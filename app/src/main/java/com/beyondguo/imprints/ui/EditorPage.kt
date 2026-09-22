@@ -1,8 +1,6 @@
 package com.beyondguo.imprints.ui
 
-import android.app.DatePickerDialog
 import android.app.Dialog
-import android.app.TimePickerDialog
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
@@ -31,6 +29,8 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
@@ -55,6 +55,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -72,6 +73,7 @@ import com.beyondguo.imprints.data.ImprintRepository
 import com.beyondguo.imprints.data.MediaChoice
 import com.beyondguo.imprints.data.PlaceEntity
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.UUID
@@ -114,6 +116,7 @@ fun EditorPage(
     var extraUris by remember { mutableStateOf<List<Uri>?>(null) }
     var initial by remember(id) { mutableStateOf<EditorSnapshot?>(null) }
     var exitRequested by remember(id) { mutableStateOf(false) }
+    var showEventTimePicker by remember(id) { mutableStateOf(false) }
 
     fun snapshot() = EditorSnapshot(body, feeling, eventTime, placeName, selectedPlace,
         visuals.map { when (it) { is MediaChoice.Existing -> it.value.id; is MediaChoice.New -> it.value.id } },
@@ -196,9 +199,9 @@ fun EditorPage(
             TextButton(onClick = ::requestExit) { Text("返回") }
         }
         if (exitRequested && !LocalImprintsLocked.current) AlertDialog(onDismissRequest = { exitRequested = false },
-            title = { Text("放弃未保存的修改？") },
-            text = { Text("当前输入和新选的附件尚未保存。") },
-            confirmButton = { TextButton(onClick = { exitRequested = false; discardPending(); onCancel() }) { Text("放弃") } },
+            title = { Text("有内容尚未保存") },
+            text = { Text("离开后，本次未保存的修改\n将不会保留。") },
+            confirmButton = { TextButton(onClick = { exitRequested = false; discardPending(); onCancel() }) { Text("放弃修改") } },
             dismissButton = { TextButton(onClick = { exitRequested = false }) { Text("继续编辑") } })
         return
     }
@@ -228,9 +231,9 @@ fun EditorPage(
             report = report,
         )
         if (exitRequested && !LocalImprintsLocked.current) AlertDialog(onDismissRequest = { exitRequested = false },
-            title = { Text("放弃未保存的修改？") },
-            text = { Text("当前输入和新选的附件尚未保存。") },
-            confirmButton = { TextButton(onClick = { exitRequested = false; discardPending(); onCancel() }) { Text("放弃") } },
+            title = { Text("有内容尚未保存") },
+            text = { Text("离开后，本次未保存的修改\n将不会保留。") },
+            confirmButton = { TextButton(onClick = { exitRequested = false; discardPending(); onCancel() }) { Text("放弃修改") } },
             dismissButton = { TextButton(onClick = { exitRequested = false }) { Text("继续编辑") } })
         return
     }
@@ -250,41 +253,30 @@ fun EditorPage(
         }
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(22.dp)) {
+        // 事件时间 → 正文 → 图片/媒体 → 位置 → 音频 → 感受
         item {
             OutlinePanel(Modifier.fillMaxWidth()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 Icon(Icons.Default.DateRange, null, tint = Quiet, modifier = Modifier.size(20.dp))
                 Text("事件时间", Modifier.weight(1f), color = Quiet, fontSize = 14.sp)
-                val parsed = runCatching { LocalDateTime.parse(eventTime) }.getOrElse { LocalDateTime.now() }
-                TextButton(onClick = {
-                    DatePickerDialog(context, { _, year, month, day ->
-                        eventTime = "%04d-%02d-%02dT%02d:%02d".format(year, month + 1, day, parsed.hour, parsed.minute)
-                    }, parsed.year, parsed.monthValue - 1, parsed.dayOfMonth).also { dialog ->
-                        activePicker = dialog
-                        dialog.setOnDismissListener { if (activePicker === dialog) activePicker = null }
-                        dialog.show()
-                    }
-                }) { Text(eventTime.take(10), color = Ink, fontSize = 13.sp) }
-                TextButton(onClick = {
-                    TimePickerDialog(context, { _, hour, minute ->
-                        eventTime = "${eventTime.take(10)}T%02d:%02d".format(hour, minute)
-                    }, parsed.hour, parsed.minute, true).also { dialog ->
-                        activePicker = dialog
-                        dialog.setOnDismissListener { if (activePicker === dialog) activePicker = null }
-                        dialog.show()
-                    }
-                }) { Text(eventTime.takeLast(5), color = Ink, fontSize = 13.sp) }
+                TextButton(onClick = { showEventTimePicker = true }) { Text(eventTime.take(10), color = Ink, fontSize = 13.sp) }
+                TextButton(onClick = { showEventTimePicker = true }) { Text(eventTime.takeLast(5), color = Ink, fontSize = 13.sp) }
             }
             }
         }
-        item { TextField(body, { body = it }, placeholder = { Text("此刻，想记下什么？", color = Quiet) },
+        item { TextField(body, { body = it }, placeholder = { Text("发生了什么值得记住的事？", color = Quiet) },
             modifier = Modifier.fillMaxWidth(), minLines = 5, textStyle = androidx.compose.ui.text.TextStyle(fontSize = 18.sp, lineHeight = 29.sp, color = Ink),
             colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent,
                 unfocusedContainerColor = Color.Transparent, focusedIndicatorColor = Color.Transparent,
                 unfocusedIndicatorColor = Color.Transparent)) }
         item { FineDivider() }
-        item { SectionTitle("图片 / 动图 / 视频") }
+        item {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                SectionTitle("图片 / 动图 / 视频", Modifier.weight(1f))
+                Text("${visuals.size}/9", color = Quiet, fontSize = 13.sp)
+            }
+        }
         item {
             EditorMediaGrid(
                 visuals = visuals,
@@ -304,25 +296,7 @@ fun EditorPage(
             )
         }
         item {
-            SectionTitle("音频")
-            Spacer(Modifier.height(12.dp))
-            OutlinePanel(Modifier.fillMaxWidth()) { Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { audioPicker.launch(arrayOf("audio/*")) }, modifier = Modifier.weight(1f)) {
-                    Text(if (audio == null) "＋ 添加一段音频" else "更换音频", color = Green)
-                }
-                if (audio != null) TextButton(onClick = {
-                    (audio as? AudioChoice.New)?.let { repository.files.discard(it.value) }
-                    audio = null
-                }) { Text("移除", color = Quiet) }
-            } }
-            when (val selected = audio) {
-                is AudioChoice.Existing -> InlineAudio(repository.files.resolve(selected.value.relativePath))
-                is AudioChoice.New -> InlineAudio(selected.value.pendingFile)
-                null -> Unit
-            }
-        }
-        item {
-            // 微信式：仅一行入口，默认不展示位置控件
+            // 微信式：仅一行入口，位于图片下方
             Row(
                 Modifier.fillMaxWidth()
                     .clickable { showLocationPicker = true }
@@ -348,17 +322,47 @@ fun EditorPage(
             }
         }
         item {
-            SectionTitle("感受")
-            Spacer(Modifier.height(5.dp))
-            Text("可选 · 默认本机保存 · 浏览时需刮开", color = Quiet, fontSize = 12.sp)
+            SectionTitle("音频")
             Spacer(Modifier.height(12.dp))
-            if (feelingLocked) {
-                Button(onClick = onUnlock) { Text("解锁后填写感受") }
-            } else OutlinedTextField(feeling, { feeling = it }, placeholder = { Text("写下这一刻的心情") },
-                modifier = Modifier.fillMaxWidth(), minLines = 3, shape = RoundedCornerShape(16.dp),
-                colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green))
+            when (val selected = audio) {
+                is AudioChoice.Existing -> InlineAudio(
+                    repository.files.resolve(selected.value.relativePath),
+                    onRemove = {
+                        audio = null
+                    },
+                    onReplace = { audioPicker.launch(arrayOf("audio/*")) },
+                )
+                is AudioChoice.New -> InlineAudio(
+                    selected.value.pendingFile,
+                    onRemove = {
+                        repository.files.discard(selected.value)
+                        audio = null
+                    },
+                    onReplace = { audioPicker.launch(arrayOf("audio/*")) },
+                )
+                null -> OutlinePanel(Modifier.fillMaxWidth()) {
+                    TextButton(onClick = { audioPicker.launch(arrayOf("audio/*")) },
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                        Text("＋ 添加一段音频", color = Green)
+                    }
+                }
+            }
         }
-        item { Spacer(Modifier.height(30.dp)) }
+        item {
+            TreasureFeelingSection(
+                feeling = feeling,
+                onFeelingChange = { feeling = it },
+                feelingLocked = feelingLocked,
+                onUnlock = onUnlock,
+            )
+        }
+        item {
+            Spacer(Modifier.height(6.dp))
+            Text("文字或图片 / 动图 / 视频，至少填写一项",
+                color = if (EntryRules.canSave(body, visuals.size, feelingLocked && feeling.isNotBlank())) Quiet else Green,
+                fontSize = 12.sp)
+            Spacer(Modifier.height(30.dp))
+        }
     }
     }
 
@@ -370,10 +374,249 @@ fun EditorPage(
             dismissButton = { TextButton(onClick = { extraUris = null }) { Text("取消") } })
     }
     if (exitRequested && !LocalImprintsLocked.current) AlertDialog(onDismissRequest = { exitRequested = false },
-        title = { Text("放弃未保存的修改？") },
-        text = { Text("当前输入和新选的附件尚未保存。") },
-        confirmButton = { TextButton(onClick = { exitRequested = false; discardPending(); onCancel() }) { Text("放弃") } },
+        title = { Text("有内容尚未保存") },
+        text = { Text("离开后，本次未保存的修改\n将不会保留。") },
+        confirmButton = { TextButton(onClick = { exitRequested = false; discardPending(); onCancel() }) { Text("放弃修改") } },
         dismissButton = { TextButton(onClick = { exitRequested = false }) { Text("继续编辑") } })
+    if (showEventTimePicker) {
+        val initialParsed = runCatching { LocalDateTime.parse(eventTime) }.getOrElse { LocalDateTime.now() }
+        EventTimePickerSheet(
+            initial = initialParsed,
+            onConfirm = { picked ->
+                eventTime = "%04d-%02d-%02dT%02d:%02d".format(
+                    picked.year, picked.monthValue, picked.dayOfMonth, picked.hour, picked.minute)
+                showEventTimePicker = false
+            },
+            onDismiss = { showEventTimePicker = false },
+        )
+    }
+}
+
+/**
+ * 事件时间底部弹层（对齐设计 51 风格的日期选择 + 时分）：
+ * 日历选日、底部时分、回到今天 / 取消 / 确定。
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun EventTimePickerSheet(
+    initial: LocalDateTime,
+    onConfirm: (LocalDateTime) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var date by remember(initial) { mutableStateOf(initial.toLocalDate()) }
+    var hour by remember(initial) { mutableStateOf(initial.hour) }
+    var minute by remember(initial) { mutableStateOf(initial.minute) }
+    var viewYear by remember(initial) { mutableStateOf(initial.year) }
+    var viewMonth by remember(initial) { mutableStateOf(initial.monthValue) }
+
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = Color.White,
+        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text("选择事件日期", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text("选择事情发生的那一天", color = Quiet, fontSize = 13.sp)
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = {
+                    if (viewMonth <= 1) { viewMonth = 12; viewYear -= 1 } else viewMonth -= 1
+                }) { Text("‹ 上个月", color = Ink, fontSize = 13.sp) }
+                Text(
+                    "$viewYear 年 · $viewMonth 月",
+                    Modifier.weight(1f),
+                    color = Ink,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+                TextButton(onClick = {
+                    if (viewMonth >= 12) { viewMonth = 1; viewYear += 1 } else viewMonth += 1
+                }) { Text("下个月 ›", color = Ink, fontSize = 13.sp) }
+            }
+
+            val firstDay = LocalDate.of(viewYear, viewMonth, 1)
+            val daysInMonth = firstDay.lengthOfMonth()
+            val startOffset = (firstDay.dayOfWeek.value + 6) % 7 // Monday-first
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(Modifier.fillMaxWidth()) {
+                    listOf("一", "二", "三", "四", "五", "六", "日").forEach { label ->
+                        Text(label, Modifier.weight(1f), color = Quiet, fontSize = 12.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    }
+                }
+                val cells = startOffset + daysInMonth
+                val weeks = (cells + 6) / 7
+                var dayNumber = 1
+                repeat(weeks) {
+                    Row(Modifier.fillMaxWidth()) {
+                        repeat(7) { col ->
+                            val cellIndex = it * 7 + col
+                            Box(Modifier.weight(1f).height(40.dp), contentAlignment = Alignment.Center) {
+                                if (cellIndex >= startOffset && dayNumber <= daysInMonth) {
+                                    val d = dayNumber
+                                    val selected = date.year == viewYear && date.monthValue == viewMonth && date.dayOfMonth == d
+                                    Box(
+                                        Modifier.size(36.dp)
+                                            .clip(RoundedCornerShape(50))
+                                            .background(if (selected) Green else Color.Transparent)
+                                            .clickable { date = LocalDate.of(viewYear, viewMonth, d) },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text("$d", color = if (selected) Color.White else Ink, fontSize = 14.sp)
+                                    }
+                                    dayNumber++
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text("已选：${date.year}年${date.monthValue}月${date.dayOfMonth}日", color = Ink, fontSize = 14.sp)
+
+            // 上下滑动选择时分（滚轮）
+            Row(
+                Modifier.fillMaxWidth().height(160.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                WheelPicker(
+                    count = 24,
+                    selected = hour,
+                    label = { "%02d".format(it) },
+                    onSelected = { hour = it },
+                    modifier = Modifier.width(72.dp),
+                )
+                Text(":", color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                WheelPicker(
+                    count = 60,
+                    selected = minute,
+                    label = { "%02d".format(it) },
+                    onSelected = { minute = it },
+                    modifier = Modifier.width(72.dp),
+                )
+            }
+            Text("上下滑动选择小时和分钟", color = Quiet, fontSize = 12.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.fillMaxWidth())
+
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = {
+                    val now = LocalDateTime.now()
+                    date = now.toLocalDate(); hour = now.hour; minute = now.minute
+                    viewYear = now.year; viewMonth = now.monthValue
+                }) { Text("回到今天", color = Green) }
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = onDismiss) { Text("取消", color = Quiet) }
+                androidx.compose.material3.Button(
+                    onClick = { onConfirm(LocalDateTime.of(date, java.time.LocalTime.of(hour, minute))) },
+                    shape = RoundedCornerShape(12.dp),
+                ) { Text("确定") }
+            }
+        }
+    }
+}
+
+/**
+ * 竖向滚轮：上下滑动 + 吸附，循环（23→0、59→0），用于选小时/分钟。
+ */
+@Composable
+private fun WheelPicker(
+    count: Int,
+    selected: Int,
+    label: (Int) -> String,
+    onSelected: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    itemHeight: androidx.compose.ui.unit.Dp = 44.dp,
+) {
+    // 虚拟长列表：中间一圈作为起点，两端靠近时无声回中，实现循环滑动
+    val cycles = 80
+    val virtualCount = count * cycles
+    val midBase = (cycles / 2) * count
+
+    fun valueOf(virtualIndex: Int): Int {
+        val m = virtualIndex % count
+        return if (m < 0) m + count else m
+    }
+
+    fun firstForValue(value: Int): Int = (midBase + value - 1).coerceIn(0, virtualCount - 3)
+
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState(
+        initialFirstVisibleItemIndex = firstForValue(selected),
+    )
+    val fling = rememberSnapFlingBehavior(listState)
+    // 中心项的虚拟下标 → 显示用
+    val centerVirtual = listState.firstVisibleItemIndex + 1
+    val centerValue = valueOf(centerVirtual)
+
+    LaunchedEffect(listState, count) {
+        var lastReported = valueOf(listState.firstVisibleItemIndex + 1)
+        androidx.compose.runtime.snapshotFlow { listState.firstVisibleItemIndex }
+            .collect { first ->
+                // 靠近两端时回中（同一 value，不闪）
+                if (first < count * 3 || first > virtualCount - count * 4) {
+                    val v = valueOf(first + 1)
+                    val target = firstForValue(v)
+                    if (target != first) {
+                        listState.scrollToItem(target)
+                        return@collect
+                    }
+                }
+                val v = valueOf(first + 1)
+                if (v != lastReported) {
+                    lastReported = v
+                    onSelected(v)
+                }
+            }
+    }
+
+    // 外部改 selected（如「回到今天」）时对齐；滚动过程中 current==selected 则不跳
+    LaunchedEffect(selected) {
+        val current = valueOf(listState.firstVisibleItemIndex + 1)
+        if (current != selected) listState.scrollToItem(firstForValue(selected))
+    }
+
+    Box(
+        modifier = modifier.height(itemHeight * 3).clip(RoundedCornerShape(12.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(itemHeight)
+                .background(PaleGreen, RoundedCornerShape(10.dp)),
+        )
+        androidx.compose.foundation.lazy.LazyColumn(
+            state = listState,
+            flingBehavior = fling,
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            items(virtualCount) { vIndex ->
+                val value = valueOf(vIndex)
+                val active = vIndex == centerVirtual
+                Box(
+                    Modifier
+                        .height(itemHeight)
+                        .fillMaxWidth()
+                        .clickable { onSelected(value) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        label(value),
+                        color = if (active) Green else Ink,
+                        fontSize = if (active) 22.sp else 17.sp,
+                        fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                    )
+                }
+            }
+        }
+    }
 }
 
 /**

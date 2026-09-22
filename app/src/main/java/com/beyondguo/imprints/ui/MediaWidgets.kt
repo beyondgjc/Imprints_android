@@ -11,6 +11,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Box
@@ -25,16 +28,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -43,6 +47,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
@@ -54,6 +59,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -79,7 +86,11 @@ private object PlaybackFocus {
 }
 
 @Composable
-fun MediaThumbnail(file: File, kind: String, modifier: Modifier = Modifier) {
+fun MediaThumbnail(
+    file: File, kind: String, modifier: Modifier = Modifier,
+    viewerCells: List<Pair<File, String>> = listOf(file to kind),
+    startIndex: Int = 0,
+) {
     val appLocked = LocalImprintsLocked.current
     var open by remember(file.path) { mutableStateOf(false) }
     val bitmap by produceState<Bitmap?>(null, file.path) {
@@ -111,13 +122,85 @@ fun MediaThumbnail(file: File, kind: String, modifier: Modifier = Modifier) {
             color = Color.White, fontSize = 9.sp)
     }
     if (open && !appLocked) {
-        AlertDialog(onDismissRequest = { open = false }, title = { Text(if (kind == "VIDEO") "视频" else "查看媒体") },
-            text = { when (kind) {
-                "VIDEO" -> VideoViewer(file)
-                "GIF" -> GifViewer(file)
-                else -> bitmap?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxWidth(), contentScale = ContentScale.Fit) }
-            } },
-            confirmButton = { TextButton(onClick = { open = false }) { Text("关闭") } })
+        FullscreenMediaViewer(cells = viewerCells, startIndex = startIndex, onClose = { open = false })
+    }
+}
+
+/** 微信式全屏查看：黑底、Fit、左右滑动切换（设计 52–56）。 */
+@Composable
+fun FullscreenMediaViewer(
+    cells: List<Pair<File, String>>,
+    startIndex: Int = 0,
+    onClose: () -> Unit,
+) {
+    if (cells.isEmpty()) { onClose(); return }
+    val initial = startIndex.coerceIn(0, cells.lastIndex)
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        val pagerState = rememberPagerState(initialPage = initial) { cells.size }
+        var page by remember { mutableStateOf(initial) }
+        LaunchedEffect(pagerState) {
+            snapshotFlow { pagerState.currentPage }.collect { page = it }
+        }
+        Box(Modifier.fillMaxSize().background(Color(0xFF141A17))) {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+            ) { index ->
+                val (file, kind) = cells[index]
+                when (kind) {
+                    "VIDEO" -> VideoViewer(file, Modifier.fillMaxSize())
+                    "GIF" -> GifViewer(file, Modifier.fillMaxSize())
+                    else -> FullscreenImageView(file)
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onClose) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "关闭", tint = Color.White)
+                }
+                Text(
+                    "${(page + 1).coerceAtLeast(1)} / ${cells.size}",
+                    Modifier.weight(1f),
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+                Spacer(Modifier.width(48.dp))
+            }
+            Text(
+                "左右切换",
+                Modifier.align(Alignment.BottomCenter).padding(bottom = 36.dp),
+                color = Color(0xFFBBC5C0),
+                fontSize = 12.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun FullscreenImageView(file: File) {
+    val bitmap by produceState<Bitmap?>(null, file.path) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(file.path, bounds)
+                val sample = maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / 2048)
+                BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
+            }.getOrNull()
+        }
+    }
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        bitmap?.let {
+            Image(
+                it.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit,
+            )
+        } ?: Text("图片加载中…", color = Color.White.copy(alpha = 0.7f))
     }
 }
 
@@ -131,40 +214,55 @@ fun MomentsMediaGrid(cells: List<Pair<File, String>>, modifier: Modifier = Modif
     val gap = 6.dp
     if (cells.size == 1) {
         val (file, kind) = cells.first()
-        MediaThumbnail(file, kind, modifier
-            .widthIn(max = 240.dp)
-            .heightIn(max = 240.dp)
-            .aspectRatio(1f, matchHeightConstraintsFirst = false))
+        MediaThumbnail(
+            file, kind,
+            modifier
+                .widthIn(max = 280.dp)
+                .heightIn(max = 280.dp)
+                .aspectRatio(1f, matchHeightConstraintsFirst = true),
+            viewerCells = cells,
+            startIndex = 0,
+        )
         return
     }
     val columns = when {
         cells.size == 4 -> 2
         else -> 3
     }
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(gap)) {
+    // 固定高度约束，避免 LazyColumn 子项测量溢出盖住下方内容
+    Column(modifier.heightIn(max = 480.dp), verticalArrangement = Arrangement.spacedBy(gap)) {
+        var baseIndex = 0
         cells.chunked(columns).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
-                row.forEach { (file, kind) ->
-                    MediaThumbnail(file, kind, Modifier.weight(1f, fill = true).aspectRatio(1f))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                row.forEachIndexed { i, (file, kind) ->
+                    MediaThumbnail(
+                        file, kind,
+                        Modifier.weight(1f, fill = true).aspectRatio(1f),
+                        viewerCells = cells,
+                        startIndex = baseIndex + i,
+                    )
                 }
                 repeat(columns - row.size) {
                     Spacer(Modifier.weight(1f, fill = true).aspectRatio(1f))
                 }
             }
+            baseIndex += row.size
         }
     }
 }
 
 @Composable
-private fun GifViewer(file: File) {
+private fun GifViewer(file: File, modifier: Modifier = Modifier) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val drawable = remember(file.path) {
         runCatching { ImageDecoder.decodeDrawable(ImageDecoder.createSource(file)) }.getOrNull()
     }
-    AndroidView(factory = { ImageView(it) }, modifier = Modifier.fillMaxWidth().height(300.dp), update = { view ->
-        view.setImageDrawable(drawable)
-        (drawable as? AnimatedImageDrawable)?.start()
-    })
+    Box(modifier, contentAlignment = Alignment.Center) {
+        AndroidView(factory = { ImageView(it) }, modifier = Modifier.fillMaxWidth(), update = { view ->
+            view.setImageDrawable(drawable)
+            (drawable as? AnimatedImageDrawable)?.start()
+        })
+    }
     DisposableEffect(drawable, lifecycleOwner) {
         val animated = drawable as? AnimatedImageDrawable
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) animated?.stop() }
@@ -174,7 +272,7 @@ private fun GifViewer(file: File) {
 }
 
 @Composable
-private fun VideoViewer(file: File) {
+private fun VideoViewer(file: File, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val player = remember(file.path) {
@@ -197,12 +295,18 @@ private fun VideoViewer(file: File) {
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    AndroidView(factory = { PlayerView(it).apply { this.player = player } },
-        modifier = Modifier.fillMaxWidth().height(280.dp))
+    AndroidView(
+        factory = { PlayerView(it).apply { this.player = player; setBackgroundColor(android.graphics.Color.BLACK) } },
+        modifier = modifier,
+    )
 }
 
 @Composable
-fun InlineAudio(file: File) {
+fun InlineAudio(
+    file: File,
+    onRemove: (() -> Unit)? = null,
+    onReplace: (() -> Unit)? = null,
+) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var player by remember(file.path) { mutableStateOf<ExoPlayer?>(null) }
@@ -236,7 +340,8 @@ fun InlineAudio(file: File) {
         while (playing) { position = player?.currentPosition ?: 0; delay(300) }
     }
     Surface(shape = RoundedCornerShape(16.dp), color = Color.White, border = BorderStroke(1.dp, Line)) {
-        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically,
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Surface(onClick = {
             val current = player ?: ExoPlayer.Builder(context).build().apply {
@@ -250,12 +355,29 @@ fun InlineAudio(file: File) {
                 color = Green, fontSize = 18.sp)
             else Icon(Icons.Default.PlayArrow, "播放音频", Modifier.padding(12.dp), tint = Green)
         }
-        Column(Modifier.weight(1f)) {
-            Text("音频记录", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            Text(if (playing) "播放中 · 点击暂停" else "点击播放", color = Quiet, fontSize = 12.sp)
+        Column(
+            Modifier.weight(1f)
+                .then(if (onReplace != null) Modifier.clickable(onClick = onReplace) else Modifier),
+        ) {
+            Text(file.nameWithoutExtension.ifBlank { "音频记录" }, color = Ink, fontSize = 14.sp,
+                fontWeight = FontWeight.Medium, maxLines = 1)
+            Text(
+                when {
+                    playing -> "播放中 · 点击暂停"
+                    onReplace != null -> "点击更换 · 播放 " + "${position / 1000}s / ${(player?.duration ?: 0).coerceAtLeast(0) / 1000}s"
+                    else -> "点击播放"
+                },
+                color = Quiet, fontSize = 12.sp, maxLines = 1,
+            )
         }
-        Text("${position / 1000}s / ${(player?.duration ?: 0).coerceAtLeast(0) / 1000}s",
-            color = Quiet, fontSize = 11.sp)
+        if (onRemove != null) {
+            IconButton(onClick = onRemove, modifier = Modifier.size(36.dp)) {
+                Text("×", color = Quiet, fontSize = 22.sp)
+            }
+        } else {
+            Text("${position / 1000}s / ${(player?.duration ?: 0).coerceAtLeast(0) / 1000}s",
+                color = Quiet, fontSize = 11.sp)
+        }
         }
     }
 }

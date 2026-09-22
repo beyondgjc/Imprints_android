@@ -53,6 +53,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
@@ -83,6 +84,8 @@ private sealed interface Page {
     data object Search : Page
     data class Detail(val id: String) : Page
     data class Editor(val id: String?) : Page
+    data class LocationDetail(val place: com.beyondguo.imprints.data.PlaceEntity) : Page
+    data class RecycleDetail(val id: String) : Page
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -99,6 +102,7 @@ fun ImprintsApp(
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
     var page by remember { mutableStateOf<Page>(Page.Timeline) }
+    var pendingScrollToId by remember { mutableStateOf<String?>(null) }
     var pinAction by remember { mutableStateOf<String?>(null) }
     var pinTitle by remember { mutableStateOf("") }
     var confirmDelete by remember { mutableStateOf<String?>(null) }
@@ -183,7 +187,12 @@ fun ImprintsApp(
     }
     Box(Modifier.fillMaxSize()) {
     BackHandler(locked) { }
-    BackHandler(page != Page.Timeline && !locked) { page = Page.Timeline }
+    BackHandler(page != Page.Timeline && !locked) {
+        page = when (page) {
+            is Page.RecycleDetail -> Page.Recycle
+            else -> Page.Timeline
+        }
+    }
     CompositionLocalProvider(LocalImprintsLocked provides locked) {
     Scaffold(
         modifier = if (locked) Modifier.clearAndSetSemantics { } else Modifier,
@@ -191,9 +200,17 @@ fun ImprintsApp(
             if (page != Page.Timeline && page !is Page.Editor) CenterAlignedTopAppBar(
                 title = { Text(when (page) {
                     Page.Timeline -> "我的印迹"; Page.Settings -> "设置"; Page.Recycle -> "回收站"
-                    Page.Search -> "搜索正文"; is Page.Detail -> "印迹详情"; is Page.Editor -> if ((page as Page.Editor).id == null) "新建印迹" else "编辑印迹"
+                    Page.Search -> "搜索正文"; is Page.Detail -> "印迹详情"
+                    is Page.RecycleDetail -> "回收站详情"
+                    is Page.Editor -> if ((page as Page.Editor).id == null) "新建印迹" else "编辑印迹"
+                    is Page.LocationDetail -> "位置详情"
                 }, color = Ink, fontWeight = FontWeight.Bold, fontSize = 20.sp) },
-                navigationIcon = { IconButton(onClick = { page = Page.Timeline }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = Ink) } },
+                navigationIcon = { IconButton(onClick = {
+                    page = when (page) {
+                        is Page.RecycleDetail -> Page.Recycle
+                        else -> Page.Timeline
+                    }
+                }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = Ink) } },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
@@ -208,7 +225,10 @@ fun ImprintsApp(
                     onOpen = { page = Page.Detail(it) },
                     onSearch = { page = Page.Search }, onSettings = { page = Page.Settings },
                     onUnlock = { askPin("feeling-unlock", "解锁感受") },
-                    onBiometric = { tryBiometric("feeling-unlock") })
+                    onBiometric = { tryBiometric("feeling-unlock") },
+                    scrollToId = pendingScrollToId,
+                    onScrollConsumed = { pendingScrollToId = null },
+                    onOpenPlace = { place -> page = Page.LocationDetail(place) })
                 Page.Settings -> SettingsPage(feelingMode, feelingBioEnabled, appLockEnabled, appBioEnabled,
                     onRecycle = { page = Page.Recycle },
                     onFeeling = {
@@ -246,25 +266,70 @@ fun ImprintsApp(
                     onImport = { openBackup.launch(arrayOf("*/*")) },
                 )
                 Page.Recycle -> RecyclePage(recycled,
+                    onOpen = { page = Page.RecycleDetail(it) },
                     onRestore = { id ->
                         scope.launch {
                             runCatching { repository.restore(id) }
-                                .onSuccess { snackbar.showSnackbar("已恢复到时间线") }
+                                .onSuccess {
+                                    snackbar.showSnackbar("已恢复到时间线")
+                                    page = Page.Timeline
+                                }
                                 .onFailure(::report)
                         }
                     },
                     onDelete = { confirmDelete = it })
-                Page.Search -> SearchPage(repository, onOpen = { page = Page.Detail(it) }, report = ::report)
+                Page.Search -> SearchPage(repository, onOpen = {
+                    pendingScrollToId = it
+                    page = Page.Timeline
+                }, report = ::report)
                 is Page.Detail -> DetailPage(repository, current.id, revealEpoch + securityEpoch,
                     onEdit = { page = Page.Editor(current.id) },
                     onDelete = {
                         scope.launch {
                             runCatching { repository.moveToRecycle(current.id) }
-                                .onSuccess { page = Page.Timeline }.onFailure(::report)
+                                .onSuccess {
+                                    snackbar.showSnackbar("已移入回收站 · 可在回收站恢复")
+                                    page = Page.Timeline
+                                }
+                                .onFailure(::report)
                         }
                     },
                     onUnlock = { askPin("feeling-unlock", "解锁感受") },
-                    onBiometric = { tryBiometric("feeling-unlock") })
+                    onBiometric = { tryBiometric("feeling-unlock") },
+                    onOpenPlace = { place -> page = Page.LocationDetail(place) })
+                is Page.RecycleDetail -> DetailPage(repository, current.id, revealEpoch + securityEpoch,
+                    onEdit = {},
+                    onDelete = {
+                        scope.launch {
+                            runCatching { repository.deletePermanently(current.id) }
+                                .onSuccess { snackbar.showSnackbar("已彻底删除") }
+                                .onFailure(::report)
+                            page = Page.Recycle
+                        }
+                    },
+                    onUnlock = { askPin("feeling-unlock", "解锁感受") },
+                    onBiometric = { tryBiometric("feeling-unlock") },
+                    onOpenPlace = { place -> page = Page.LocationDetail(place) },
+                    recycleActions = {
+                        scope.launch {
+                            runCatching { repository.restore(current.id) }
+                                .onSuccess {
+                                    snackbar.showSnackbar("已恢复到时间线")
+                                    page = Page.Timeline
+                                }
+                                .onFailure(::report)
+                        }
+                    })
+                is Page.LocationDetail -> {
+                    val place = current.place
+                    val related = active.filter { entry -> entry.placeId == place.id }
+                    LocationDetailPage(
+                        place = place,
+                        relatedEntries = related,
+                        onBack = { page = Page.Timeline },
+                        onOpenEntry = { page = Page.Detail(it) },
+                    )
+                }
                 is Page.Editor -> EditorPage(repository, current.id, revealEpoch + securityEpoch,
                     onSaved = { page = Page.Detail(it) },
                     onCancel = { page = Page.Timeline },
@@ -334,12 +399,12 @@ fun ImprintsApp(
             dismissButton = { TextButton(onClick = { backupPreview = null; backupPassword = "" }) { Text("取消") } })
     }
     if (!locked) confirmDelete?.let { id ->
-        AlertDialog(onDismissRequest = { confirmDelete = null }, title = { Text("彻底删除这条印迹？") },
-            text = { Text("原内容和附件将被删除。") },
+        AlertDialog(onDismissRequest = { confirmDelete = null }, title = { Text("立即彻底删除？") },
+            text = { Text("删除后无法恢复，正文、感受\n和全部附件都会被永久移除。") },
             confirmButton = { TextButton(onClick = {
                 confirmDelete = null
                 scope.launch { runCatching { repository.deletePermanently(id) }.onFailure(::report) }
-            }) { Text("删除") } },
+            }) { Text("立即删除") } },
             dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("取消") } })
     }
     if (!locked && confirmDisableFeeling) AlertDialog(
@@ -415,33 +480,41 @@ private fun SettingsPage(
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Spacer(Modifier.height(10.dp)) }
         item { Text("本机存储", color = Quiet, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
-        item { Text("印迹保存在本机。需要迁移时，可手动导出加密备份。",
+        item { Text("印迹只保存在这台设备，不上传、不同步。",
             color = Ink, fontSize = 15.sp, lineHeight = 23.sp) }
         item { Spacer(Modifier.height(8.dp)) }
-        item { SettingsAction("回收站", "删除的印迹保留 7 天", onClick = onRecycle) }
+        item { SettingsAction("回收站", "保留 7 天", onClick = onRecycle) }
         item { Spacer(Modifier.height(8.dp)) }
         item { Text("隐私与安全", color = Quiet, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
-        item { SettingsAction(if (feelingMode == "ON") "关闭感受加密" else "开启感受加密",
-            if (feelingMode == "ON") "已加密保存 · 查看时仍需刮开" else "默认本机明文保存 · 查看时需刮开",
+        item { SettingsAction(if (feelingMode == "ON") "关闭感受加密" else "感受单独加密",
+            if (feelingMode == "ON") "已开启 · 查看前需验证，再刮开涂层"
+            else "保存后以品牌绿涂层遮挡，浏览时刮开可见",
             onClick = onFeeling) }
         if (feelingMode == "ON") {
             item { SettingsAction("修改感受口令", "6 位数字", onClick = onFeelingPinChange) }
             item { SettingsAction(if (feelingBio) "关闭感受生物识别" else "开启感受生物识别",
                 "用于查看加密感受", onClick = onFeelingBio) }
         }
-        item { SettingsAction(if (appLock) "关闭应用锁" else "开启应用锁",
-            if (appLock) "已保护整个应用" else "打开应用时验证 6 位口令", onClick = onAppLock) }
+        item { SettingsAction(if (appLock) "关闭应用锁" else "应用锁",
+            if (appLock) "已开启 · 每次重新进入应用都需验证" else "打开应用时验证 6 位口令", onClick = onAppLock) }
         if (appLock) {
-            item { SettingsAction("修改应用锁口令", "6 位数字", onClick = onAppPinChange) }
+            item { SettingsAction("修改解锁密码", "6 位数字", onClick = onAppPinChange) }
             item { SettingsAction(if (appBio) "关闭应用锁生物识别" else "开启应用锁生物识别",
                 "用于解锁应用", onClick = onAppBio) }
         }
         item { Spacer(Modifier.height(8.dp)) }
-        item { Text("数据备份", color = Quiet, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
-        item { SettingsAction("导出加密备份", "保存到你选择的位置", onClick = onExport) }
-        item { SettingsAction("导入备份", "从本地文件恢复印迹", onClick = onImport) }
-        item { Text("本地保存 · 手动备份", Modifier.fillMaxWidth().padding(vertical = 40.dp),
-            color = Green, fontSize = 13.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
+        item { Text("数据导入与导出", color = Quiet, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
+        item { Text("把印迹保存在自己手里。手动备份，不会自动上传或同步。",
+            color = Ink, fontSize = 14.sp, lineHeight = 22.sp) }
+        item { SettingsAction("导出加密备份", "包含本机全部印迹和附件", onClick = onExport) }
+        item { SettingsAction("导入备份", "先校验和预览，不覆盖现有数据", onClick = onImport) }
+        item { Text("备份文件需要独立口令。\n请妥善保存文件和口令。",
+            Modifier.fillMaxWidth().padding(top = 4.dp),
+            color = Quiet, fontSize = 12.sp, lineHeight = 18.sp) }
+        item { Text("本地保存 · 手动备份\n分享与同步留待以后\n无需注册或登录",
+            Modifier.fillMaxWidth().padding(vertical = 36.dp),
+            color = Green, fontSize = 13.sp, lineHeight = 22.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
     }
 }
 
@@ -459,23 +532,38 @@ private fun BackupPasswordDialog(title: String, onDismiss: () -> Unit, onConfirm
 }
 
 @Composable
-private fun RecyclePage(entries: List<EntryEntity>, onRestore: (String) -> Unit, onDelete: (String) -> Unit) {
+private fun RecyclePage(entries: List<EntryEntity>, onOpen: (String) -> Unit,
+    onRestore: (String) -> Unit, onDelete: (String) -> Unit) {
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item { OutlinePanel(Modifier.fillMaxWidth()) {
             Text("删除的印迹会在这里保留 7 天，之后自动清除。", Modifier.padding(18.dp),
                 color = Quiet, fontSize = 14.sp, lineHeight = 22.sp)
         } }
         item { Text("${entries.size} 条印迹", Modifier.padding(top = 10.dp), color = Quiet, fontSize = 14.sp) }
-        if (entries.isEmpty()) item { Text("回收站是空的", Modifier.fillMaxWidth().padding(vertical = 52.dp),
-            color = Quiet, textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
+        if (entries.isEmpty()) {
+            item { Text("回收站是空的", Modifier.fillMaxWidth().padding(top = 48.dp),
+                color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
+            item { Text("移入的印迹会在这里保留 7 天。", Modifier.fillMaxWidth(),
+                color = Quiet, fontSize = 13.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
+        }
         items(entries, key = { it.id }) { entry ->
-            OutlinePanel(Modifier.fillMaxWidth()) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                Text(entry.body.ifBlank { "媒体印迹" }, color = Ink, fontSize = 16.sp, maxLines = 2)
+            OutlinePanel(Modifier.fillMaxWidth().clickable { onOpen(entry.id) }) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                Text(entry.eventLocalMinute.replace('T', ' '), color = Quiet, fontSize = 12.sp)
+                Text(entry.body.ifBlank { "媒体印迹" }, color = Ink, fontSize = 16.sp, maxLines = 3)
                 Text(entry.deletedAtMs?.let(::RecycleCountdown) ?: "", color = Quiet, fontSize = 12.sp)
+                Text("到期后自动彻底删除", color = Quiet, fontSize = 11.sp)
                 FineDivider()
                 Row { TextButton(onClick = { onRestore(entry.id) }) { Text("恢复", color = Green) }
                     TextButton(onClick = { onDelete(entry.id) }) { Text("彻底删除", color = Quiet) } }
             } }
+        }
+        if (entries.isNotEmpty()) item {
+            Text("按移入时间排列；点按查看详情，可恢复或彻底删除。",
+                Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                color = Quiet, fontSize = 12.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         }
     }
 }
@@ -485,26 +573,53 @@ private fun SearchPage(repository: ImprintRepository, onOpen: (String) -> Unit,
     report: (Throwable) -> Unit) {
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf(emptyList<EntryEntity>()) }
+    val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(query) {
         if (query.isBlank()) results = emptyList()
         else runCatching { repository.searchBody(query) }.onSuccess { results = it }.onFailure(report)
     }
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
         OutlinedTextField(query, { query = it }, placeholder = { Text("搜索印迹正文") },
-            modifier = Modifier.fillMaxWidth(), singleLine = true,
+            modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+            singleLine = true,
             shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
             colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green))
         Spacer(Modifier.height(20.dp))
-        if (query.isBlank()) Text("输入关键词，找回一段印迹", Modifier.fillMaxWidth().padding(top = 44.dp),
-            color = Quiet, textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontSize = 14.sp)
-        if (query.isNotBlank()) Text("找到 ${results.size} 条印迹", color = Quiet, fontSize = 13.sp)
+        if (query.isBlank()) Column(
+            Modifier.fillMaxWidth().padding(top = 44.dp),
+            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("想找回哪一刻？", color = Ink, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+            Text("搜索你写过的事情。", color = Quiet, fontSize = 13.sp)
+        }
+        if (query.isNotBlank() && results.isEmpty()) Column(
+            Modifier.fillMaxWidth().padding(top = 44.dp),
+            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("没有找到相关印迹", color = Ink, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+            Text("换一个词，试试事情的写法。", color = Quiet, fontSize = 13.sp)
+        }
+        if (query.isNotBlank() && results.isNotEmpty()) {
+            Text("找到 ${results.size} 条印迹", color = Quiet, fontSize = 13.sp)
+        }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) { items(results, key = { it.id }) { entry ->
             Column(Modifier.fillMaxWidth().clickable { onOpen(entry.id) }.padding(vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(entry.eventLocalMinute.replace('T', ' '), color = Quiet, fontSize = 12.sp)
+                Text(formatSearchDate(entry.eventLocalMinute), color = Quiet, fontSize = 12.sp)
                 Text(entry.body, color = Ink, fontSize = 16.sp, lineHeight = 24.sp, maxLines = 3)
                 FineDivider()
             }
         } }
     }
 }
+
+private fun formatSearchDate(minute: String): String = runCatching {
+    val date = java.time.LocalDate.parse(minute.take(10))
+    val weekday = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")[date.dayOfWeek.value - 1]
+    "${date.monthValue}月${date.dayOfMonth}日 · $weekday"
+}.getOrElse { minute.replace('T', ' ') }

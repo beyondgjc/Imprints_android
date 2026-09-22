@@ -1,10 +1,6 @@
 package com.beyondguo.imprints.ui
 
-import android.app.DatePickerDialog
 import android.app.Dialog
-import android.content.Intent
-import android.widget.Toast
-import android.net.Uri
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
@@ -36,6 +32,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.MaterialTheme
@@ -64,7 +61,6 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -81,7 +77,6 @@ import com.beyondguo.imprints.data.EntryEntity
 import com.beyondguo.imprints.data.EntryRules
 import com.beyondguo.imprints.data.FeelingEntity
 import com.beyondguo.imprints.data.ImprintRepository
-import com.beyondguo.imprints.location.Wgs84GCJ02
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import java.time.LocalDate
@@ -97,8 +92,9 @@ fun TimelinePage(
     entries: List<EntryEntity>, repository: ImprintRepository, epoch: Int,
     onOpen: (String) -> Unit, onSearch: () -> Unit, onSettings: () -> Unit,
     onUnlock: () -> Unit, onBiometric: () -> Unit,
+    scrollToId: String? = null, onScrollConsumed: () -> Unit = {},
+    onOpenPlace: (com.beyondguo.imprints.data.PlaceEntity) -> Unit = {},
 ) {
-    val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     var activePicker by remember { mutableStateOf<Dialog?>(null) }
@@ -111,10 +107,48 @@ fun TimelinePage(
     }
     val listState = rememberLazyListState()
     var details by remember { mutableStateOf(emptyMap<String, EntryDetail>()) }
+    var showTimeTravel by remember { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(enabled = showTimeTravel) { showTimeTravel = false }
     LaunchedEffect(entries, epoch) {
         details = entries.mapNotNull { repository.detail(it.id)?.let { detail -> it.id to detail } }.toMap()
     }
     val indexes = buildTimelineIndexes(entries.map { it.id to it.eventLocalMinute.take(7) })
+    val monthsWithEntries = entries.map { it.eventLocalMinute.take(7) }.toSet()
+    val daysWithEntries = entries.map { it.eventLocalMinute.take(10) }.toSet()
+
+    fun scrollToEntry(match: com.beyondguo.imprints.data.EntryEntity?) {
+        if (match == null) return
+        scope.launch { listState.scrollToItem(indexes[match.id] ?: 0) }
+    }
+
+    LaunchedEffect(scrollToId, entries) {
+        val id = scrollToId ?: return@LaunchedEffect
+        val index = indexes[id]
+        if (index != null) listState.scrollToItem(index)
+        onScrollConsumed()
+    }
+
+    if (showTimeTravel && entries.isNotEmpty()) {
+        TimeTravelPage(
+            monthsWithEntries = monthsWithEntries,
+            daysWithEntries = daysWithEntries,
+            onSelectMonth = { year, month ->
+                val target = "%04d-%02d".format(year, month)
+                val match = entries.firstOrNull { it.eventLocalMinute.take(7) <= target } ?: entries.last()
+                showTimeTravel = false
+                scrollToEntry(match)
+            },
+            onSelectDay = { day ->
+                val target = day.toString()
+                val match = entries.firstOrNull { it.eventLocalMinute.take(10) <= target } ?: entries.last()
+                showTimeTravel = false
+                scrollToEntry(match)
+            },
+            onBack = { showTimeTravel = false },
+        )
+        return
+    }
+
     LazyColumn(Modifier.fillMaxSize(), state = listState) {
         item(key = "header") {
             Column(Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 28.dp, bottom = 22.dp),
@@ -135,84 +169,84 @@ fun TimelinePage(
         if (entries.isEmpty()) item {
             Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 56.dp),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("写下第一枚印迹", color = Ink, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
-                Text("记下今天值得留下的瞬间", color = Quiet, fontSize = 14.sp)
-            }
-        }
-        if (entries.isNotEmpty()) item(key = "locators") {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Text(displayMonth(entries.first().eventLocalMinute.take(7)), Modifier.weight(1f),
-                    color = Quiet, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                TextButton(onClick = {
-                val today = LocalDate.now()
-                DatePickerDialog(context, { _, year, month, _ ->
-                    val target = "%04d-%02d".format(year, month + 1)
-                    val match = entries.firstOrNull { it.eventLocalMinute.take(7) <= target } ?: entries.last()
-                    scope.launch { listState.scrollToItem(indexes[match.id] ?: 0) }
-                }, today.year, today.monthValue - 1, today.dayOfMonth).also { dialog ->
-                    activePicker = dialog
-                    dialog.setOnDismissListener { if (activePicker === dialog) activePicker = null }
-                    dialog.show()
-                }
-                }) { Text("月份", color = Quiet, fontSize = 12.sp) }
-                IconButton(onClick = {
-                val today = LocalDate.now()
-                DatePickerDialog(context, { _, year, month, day ->
-                    val target = "%04d-%02d-%02d".format(year, month + 1, day)
-                    val match = entries.firstOrNull { it.eventLocalMinute.take(10) <= target } ?: entries.last()
-                    scope.launch { listState.scrollToItem(indexes[match.id] ?: 0) }
-                }, today.year, today.monthValue - 1, today.dayOfMonth).also { dialog ->
-                    activePicker = dialog
-                    dialog.setOnDismissListener { if (activePicker === dialog) activePicker = null }
-                    dialog.show()
-                }
-                }) { Icon(Icons.Default.DateRange, "按日定位", tint = Quiet) }
+                Text("留下你的第一条印迹", color = Ink, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
+                Text("经历、见闻，或某一刻的感受。", color = Quiet, fontSize = 14.sp)
             }
         }
         var previousMonth = ""
         entries.forEach { entry ->
             val month = entry.eventLocalMinute.take(7)
             if (month != previousMonth) {
+                // 对齐设计稿 20：吸顶栏 = 月份文字 + 右侧日历（时间穿梭），不再另起定位条
                 stickyHeader(key = "month-$month") {
-                    Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)
-                        .padding(horizontal = 22.dp, vertical = 14.dp)) {
-                        Text(displayMonth(month), color = Quiet, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.background)
+                            .padding(horizontal = 22.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            displayMonth(month),
+                            Modifier.weight(1f),
+                            color = Quiet,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        IconButton(
+                            onClick = { showTimeTravel = true },
+                            modifier = Modifier.size(40.dp),
+                        ) {
+                            Icon(Icons.Default.DateRange, "按时间定位", tint = Quiet, modifier = Modifier.size(20.dp))
+                        }
                     }
                 }
                 previousMonth = month
             }
             item(key = entry.id) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 15.dp),
-                    verticalArrangement = Arrangement.spacedBy(13.dp)) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 22.dp, vertical = 15.dp)
+                        .clickable { onOpen(entry.id) },
+                    verticalArrangement = Arrangement.spacedBy(13.dp),
+                ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(entry.eventLocalMinute.substring(8, 10), color = Ink, fontSize = 30.sp, fontWeight = FontWeight.Bold)
                             val date = runCatching { LocalDate.parse(entry.eventLocalMinute.take(10)) }.getOrNull()
                             val weekday = date?.dayOfWeek?.value?.let { listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")[it - 1] }.orEmpty()
                             Text("$weekday · ${entry.eventLocalMinute.takeLast(5)}", color = Quiet, fontSize = 13.sp)
-                        }
-                        details[entry.id]?.place?.let { place ->
-                            Text(place.name, Modifier.clickable(enabled = place.latitude != null && place.longitude != null) {
-                                val (wgsLat, wgsLng) = Wgs84GCJ02.toWgs84(
-                                    place.latitude!!, place.longitude!!, place.coordinateSystem)
-                                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW,
-                                    Uri.parse("geo:0,0?q=$wgsLat,$wgsLng"))) }
-                                    .onFailure { Toast.makeText(context, "未找到可用的地图应用", Toast.LENGTH_SHORT).show() }
-                            }, color = Color(0xFF07C160))
+                            // 设计 16：位置跟在时间后同一行
+                            details[entry.id]?.place?.let { place ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    modifier = Modifier.clickable { onOpenPlace(place) },
+                                ) {
+                                    Icon(
+                                        Icons.Default.LocationOn,
+                                        null,
+                                        tint = Color(0xFF07C160),
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                    Text(place.name, color = Color(0xFF07C160), fontSize = 13.sp, maxLines = 1)
+                                }
+                            }
                         }
                         if (entry.body.isNotBlank()) {
                             var expanded by remember(entry.id) { mutableStateOf(false) }
-                            Text(entry.body, Modifier.fillMaxWidth().clickable { onOpen(entry.id) },
+                            Text(entry.body, Modifier.fillMaxWidth(),
                                 color = Ink, fontSize = 17.sp, lineHeight = 27.sp,
                                 maxLines = if (expanded) Int.MAX_VALUE else 2)
-                            if (entry.body.length > 80) Text(if (expanded) "收起" else "展开全文",
+                            if (entry.body.length > 80) Text(if (expanded) "收起" else "展开",
                                 Modifier.clickable { expanded = !expanded }, color = Green, fontSize = 14.sp)
                         }
                         details[entry.id]?.let { detail ->
                             if (detail.visuals.isNotEmpty()) MomentsMediaGrid(
                                 detail.visuals.map {
                                     repository.files.resolve(it.relativePath) to it.kind
-                                }
+                                },
+                                Modifier.fillMaxWidth().heightIn(max = 420.dp),
                             )
                             detail.audio?.let { InlineAudio(repository.files.resolve(it.relativePath)) }
                             if (detail.feeling != null) FeelingCard(detail.feeling, repository, epoch, onUnlock, onBiometric)
@@ -232,8 +266,9 @@ private fun displayMonth(value: String): String = runCatching {
 fun DetailPage(
     repository: ImprintRepository, id: String, epoch: Int,
     onEdit: () -> Unit, onDelete: () -> Unit, onUnlock: () -> Unit, onBiometric: () -> Unit,
+    onOpenPlace: (com.beyondguo.imprints.data.PlaceEntity) -> Unit = {},
+    recycleActions: (() -> Unit)? = null,
 ) {
-    val context = LocalContext.current
     var detail by remember(id) { mutableStateOf<EntryDetail?>(null) }
     var confirmRecycle by remember(id) { mutableStateOf(false) }
     LaunchedEffect(id, epoch) { detail = repository.detail(id) }
@@ -242,49 +277,66 @@ fun DetailPage(
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 22.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         item { Column(Modifier.padding(top = 22.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             val date = value.entry.eventLocalMinute
-            val dateLabel = runCatching { LocalDateTime.parse(date).format(DateTimeFormatter.ofPattern("yyyy年M月d日")) }
-                .getOrElse { date.take(10) }
+            val dateLabel = runCatching {
+                val d = LocalDateTime.parse(date)
+                val weekday = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")[d.dayOfWeek.value - 1]
+                "${d.year}年${d.monthValue}月${d.dayOfMonth}日 · $weekday"
+            }.getOrElse { date.take(10) }
             Text(dateLabel, color = Ink, fontSize = 30.sp, fontWeight = FontWeight.Bold)
             Text(date.takeLast(5), color = Quiet, fontSize = 14.sp)
         } }
         if (value.entry.body.isNotBlank()) item { Text(value.entry.body, color = Ink, fontSize = 18.sp, lineHeight = 30.sp) }
         value.place?.let { place -> item {
-            val coordinates = if (place.latitude != null && place.longitude != null) {
-                val (wgsLat, wgsLng) = Wgs84GCJ02.toWgs84(
-                    place.latitude!!, place.longitude!!, place.coordinateSystem)
-                "$wgsLat,$wgsLng"
-            } else null
-            Text("⌖  ${place.name}", Modifier.clickable(enabled = coordinates != null) {
-                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=$coordinates"))) }
-                    .onFailure { Toast.makeText(context, "未找到可用的地图应用", Toast.LENGTH_SHORT).show() }
-            }, color = Green, fontSize = 14.sp)
+            // 设计 49：先进入位置详情，再选择导航
+            Text("⌖  ${place.name}", Modifier.clickable { onOpenPlace(place) }, color = Green, fontSize = 14.sp)
         } }
         if (value.visuals.isNotEmpty()) item {
+            // 约束媒体区高度，避免与下方音频/感受重叠
             MomentsMediaGrid(
                 value.visuals.map { repository.files.resolve(it.relativePath) to it.kind },
-                Modifier.fillMaxWidth()
+                Modifier.fillMaxWidth().heightIn(max = 480.dp)
             )
         }
         value.audio?.let { audio -> item { InlineAudio(repository.files.resolve(audio.relativePath)) } }
         value.feeling?.let { feeling -> item { FeelingCard(feeling, repository, epoch, onUnlock, onBiometric) } }
         item { FineDivider() }
-        item { Text("记录于 ${formatRecordedAt(value.entry.createdAtMs)}", color = Quiet, fontSize = 12.sp) }
-        item { Text("更新于 ${formatRecordedAt(value.entry.updatedAtMs)}", color = Quiet, fontSize = 12.sp) }
-        item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Button(onClick = onEdit, shape = RoundedCornerShape(12.dp)) { Text("编辑印迹") }
-            TextButton(onClick = { confirmRecycle = true }) { Text("移入回收站", color = Quiet) }
-        } }
+        item { Text(formatRecordedAt(value.entry.createdAtMs), color = Quiet, fontSize = 12.sp) }
+        item { Text(formatUpdatedAt(value.entry.updatedAtMs), color = Quiet, fontSize = 12.sp) }
+        if (recycleActions != null) {
+            item { Text(
+                (value.entry.deletedAtMs?.let { RecycleCountdown(it) } ?: "") + "\n到期后自动彻底删除",
+                color = Quiet, fontSize = 13.sp, lineHeight = 20.sp,
+            ) }
+            item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Button(onClick = recycleActions, shape = RoundedCornerShape(12.dp)) { Text("恢复印迹") }
+                TextButton(onClick = { confirmRecycle = true }) { Text("立即彻底删除", color = Quiet) }
+            } }
+        } else {
+            item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Button(onClick = onEdit, shape = RoundedCornerShape(12.dp)) { Text("编辑印迹") }
+                TextButton(onClick = { confirmRecycle = true }) { Text("移入回收站", color = Quiet) }
+            } }
+        }
         item { Spacer(Modifier.height(32.dp)) }
     }
     if (confirmRecycle && !LocalImprintsLocked.current) AlertDialog(onDismissRequest = { confirmRecycle = false },
-        title = { Text("移入回收站？") },
-        text = { Text("7 天内可在设置中的回收站恢复。") },
-        confirmButton = { TextButton(onClick = { confirmRecycle = false; onDelete() }) { Text("移入回收站") } },
+        title = { Text(if (recycleActions != null) "立即彻底删除？" else "移入回收站？") },
+        text = { if (recycleActions != null) Text("删除后无法恢复，正文、感受\n和全部附件都会被永久移除。")
+            else Text("移入后可在 7 天内恢复。\n到期后将自动彻底删除。") },
+        confirmButton = { TextButton(onClick = { confirmRecycle = false; onDelete() }) {
+            Text(if (recycleActions != null) "立即删除" else "移入回收站") } },
         dismissButton = { TextButton(onClick = { confirmRecycle = false }) { Text("取消") } })
 }
 
 private fun formatRecordedAt(timestamp: Long): String = Instant.ofEpochMilli(timestamp)
-    .atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm"))
+    .atZone(ZoneId.systemDefault()).let {
+        "记录于 ${it.monthValue}月${it.dayOfMonth}日 %02d:%02d".format(it.hour, it.minute)
+    }
+
+private fun formatUpdatedAt(timestamp: Long): String = Instant.ofEpochMilli(timestamp)
+    .atZone(ZoneId.systemDefault()).let {
+        "更新于 ${it.monthValue}月${it.dayOfMonth}日 %02d:%02d".format(it.hour, it.minute)
+    }
 
 @Composable
 fun FeelingCard(

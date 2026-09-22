@@ -294,6 +294,20 @@ fun LocationPickerPage(
                     }
                 }
 
+                if (selected != null && selected.name.isNotBlank()) {
+                    item {
+                        Text(
+                            "清除已选择的位置",
+                            Modifier.fillMaxWidth()
+                                .clickable { onSelect(null) }
+                                .padding(horizontal = 20.dp, vertical = 12.dp),
+                            color = Quiet,
+                            fontSize = 13.sp,
+                        )
+                        FineDivider()
+                    }
+                }
+
                 // 未授权 → 引导
                 if (nearbyHint.startsWith("点击允许")) {
                     item {
