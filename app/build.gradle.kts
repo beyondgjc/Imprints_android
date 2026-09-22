@@ -17,6 +17,13 @@ val amapAndroidKey: String = run {
     }
 }
 
+// release 签名：根目录 keystore.properties（gitignore），不进仓库
+val keystoreProps = Properties().apply {
+    val f = rootProject.file("keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+val hasReleaseSigning = keystoreProps.getProperty("storeFile")?.isNotBlank() == true
+
 android {
     namespace = "com.beyondguo.imprints"
     compileSdk {
@@ -37,10 +44,24 @@ android {
         manifestPlaceholders["amapApiKey"] = amapAndroidKey
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             optimization {
                 enable = false
+            }
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
             }
         }
     }

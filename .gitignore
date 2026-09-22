@@ -13,3 +13,8 @@
 .externalNativeBuild
 .cxx
 local.properties
+# release 签名：绝不进 git
+/keystore/
+/keystore.properties
+*.keystore
+*.jks

@@ -312,8 +312,8 @@ fun DetailPage(
                 TextButton(onClick = { confirmRecycle = true }) { Text("立即彻底删除", color = Quiet) }
             } }
         } else {
-            item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Button(onClick = onEdit, shape = RoundedCornerShape(12.dp)) { Text("编辑印迹") }
+            // 编辑已移到顶栏右上角（设计 41）；底部仅保留移入回收站
+            item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(onClick = { confirmRecycle = true }) { Text("移入回收站", color = Quiet) }
             } }
         }

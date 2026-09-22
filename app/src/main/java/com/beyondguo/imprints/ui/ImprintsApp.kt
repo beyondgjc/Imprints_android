@@ -211,6 +211,14 @@ fun ImprintsApp(
                         else -> Page.Timeline
                     }
                 }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = Ink) } },
+                actions = {
+                    // 设计 41：详情顶栏右上角「编辑」
+                    if (page is Page.Detail) {
+                        TextButton(onClick = { page = Page.Editor((page as Page.Detail).id) }) {
+                            Text("编辑", color = Green, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
