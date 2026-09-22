@@ -1,0 +1,510 @@
+package com.beyondguo.imprints.ui
+
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.unit.dp
+import com.beyondguo.imprints.data.AudioChoice
+import com.beyondguo.imprints.backup.BackupPreview
+import com.beyondguo.imprints.backup.BackupService
+import com.beyondguo.imprints.data.ImprintDatabase
+import com.beyondguo.imprints.data.EntryDetail
+import com.beyondguo.imprints.data.EntryDraft
+import com.beyondguo.imprints.data.EntryEntity
+import com.beyondguo.imprints.data.ImprintRepository
+import com.beyondguo.imprints.data.MediaChoice
+import kotlinx.coroutines.launch
+import android.net.Uri
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+
+private sealed interface Page {
+    data object Timeline : Page
+    data object Settings : Page
+    data object Recycle : Page
+    data object Search : Page
+    data class Detail(val id: String) : Page
+    data class Editor(val id: String?) : Page
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ImprintsApp(
+    repository: ImprintRepository,
+    initialized: Boolean,
+    locked: Boolean,
+    revealEpoch: Int,
+    unlockApp: suspend (String) -> Boolean,
+    refreshLockState: suspend () -> Unit,
+    requestBiometric: (String, () -> Unit, () -> Unit) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val snackbar = remember { SnackbarHostState() }
+    var page by remember { mutableStateOf<Page>(Page.Timeline) }
+    var pinAction by remember { mutableStateOf<String?>(null) }
+    var pinTitle by remember { mutableStateOf("") }
+    var confirmDelete by remember { mutableStateOf<String?>(null) }
+    var confirmDisableFeeling by remember { mutableStateOf(false) }
+    var securityEpoch by remember { mutableStateOf(0) }
+    val security = repository.security
+    val context = LocalContext.current
+    val backup = remember(repository) { BackupService(context, ImprintDatabase.get(context), repository) }
+    var backupAction by remember { mutableStateOf<String?>(null) }
+    var backupPassword by remember { mutableStateOf("") }
+    var importUri by remember { mutableStateOf<Uri?>(null) }
+    var backupPreview by remember { mutableStateOf<BackupPreview?>(null) }
+    var pendingExportUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingImportPreview by remember { mutableStateOf<BackupPreview?>(null) }
+    fun report(error: Throwable) { scope.launch { snackbar.showSnackbar(error.message ?: "操作失败") } }
+    fun askPin(action: String, title: String) { pinAction = action; pinTitle = title }
+    val createBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        if (uri != null) pendingExportUri = uri else backupPassword = ""
+    }
+    val openBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) { importUri = uri; backupAction = "import" }
+    }
+    val active by repository.active.collectAsState(initial = emptyList())
+    val recycled by repository.recycled.collectAsState(initial = emptyList())
+    var feelingMode by remember { mutableStateOf("OFF") }
+    var appLockEnabled by remember { mutableStateOf(false) }
+    var appBioEnabled by remember { mutableStateOf(false) }
+    var feelingBioEnabled by remember { mutableStateOf(false) }
+
+    LaunchedEffect(securityEpoch, initialized) {
+        if (initialized) {
+            val state = security.state()
+            feelingMode = state.feelingMode
+            appLockEnabled = state.appLockHeaderJson != null
+            appBioEnabled = state.appLockBiometricEnabled
+            feelingBioEnabled = state.feelingBiometricEnvelope != null
+        }
+    }
+
+    fun tryBiometric(target: String, after: () -> Unit = {}, fallback: () -> Unit = {
+        scope.launch { snackbar.showSnackbar("请使用对应的 6 位口令") }
+    }) {
+        requestBiometric(target, { securityEpoch++; after() }, fallback)
+    }
+
+    LaunchedEffect(pendingExportUri, pendingImportPreview, locked, securityEpoch, initialized) {
+        if (!initialized || locked) return@LaunchedEffect
+        val exportUri = pendingExportUri
+        val importPreview = pendingImportPreview
+        if (exportUri == null && importPreview == null) return@LaunchedEffect
+        if (security.state().feelingMode == "ON" && !security.isFeelingUnlocked()) {
+            askPin(if (exportUri != null) "feeling-export" else "feeling-import", "验证感受口令后继续备份")
+            return@LaunchedEffect
+        }
+        if (exportUri != null) {
+            pendingExportUri = null
+            val password = backupPassword.toCharArray()
+            scope.launch {
+                runCatching { backup.export(exportUri, password) }
+                    .onSuccess { snackbar.showSnackbar("加密备份已导出") }.onFailure(::report)
+                password.fill('\u0000')
+                backupPassword = ""
+            }
+        } else if (importPreview != null) {
+            pendingImportPreview = null
+            val uri = importUri ?: return@LaunchedEffect
+            val password = backupPassword.toCharArray()
+            scope.launch {
+                runCatching { backup.import(uri, password, importPreview,
+                    allowPlaintextConversion = importPreview.feelingMode == "ON" && feelingMode == "OFF") }
+                    .onSuccess { snackbar.showSnackbar("已导入 $it 条印迹") }.onFailure(::report)
+                password.fill('\u0000')
+                backupPassword = ""
+                importUri = null
+            }
+        }
+    }
+
+    if (!initialized) {
+        Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) { Text("正在加载印迹…") }
+        return
+    }
+    Box(Modifier.fillMaxSize()) {
+    BackHandler(locked) { }
+    BackHandler(page != Page.Timeline && !locked) { page = Page.Timeline }
+    CompositionLocalProvider(LocalImprintsLocked provides locked) {
+    Scaffold(
+        modifier = if (locked) Modifier.clearAndSetSemantics { } else Modifier,
+        topBar = {
+            if (page != Page.Timeline && page !is Page.Editor) CenterAlignedTopAppBar(
+                title = { Text(when (page) {
+                    Page.Timeline -> "我的印迹"; Page.Settings -> "设置"; Page.Recycle -> "回收站"
+                    Page.Search -> "搜索正文"; is Page.Detail -> "印迹详情"; is Page.Editor -> if ((page as Page.Editor).id == null) "新建印迹" else "编辑印迹"
+                }, color = Ink, fontWeight = FontWeight.Bold, fontSize = 20.sp) },
+                navigationIcon = { IconButton(onClick = { page = Page.Timeline }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = Ink) } },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbar) },
+        floatingActionButton = { if (page == Page.Timeline) FloatingActionButton(
+            onClick = { page = Page.Editor(null) }, shape = CircleShape, containerColor = Green,
+            contentColor = Color.White) { Icon(Icons.Default.Add, "新建印迹") } },
+    ) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding)) {
+            when (val current = page) {
+                Page.Timeline -> TimelinePage(active, repository, revealEpoch + securityEpoch,
+                    onOpen = { page = Page.Detail(it) },
+                    onSearch = { page = Page.Search }, onSettings = { page = Page.Settings },
+                    onUnlock = { askPin("feeling-unlock", "解锁感受") },
+                    onBiometric = { tryBiometric("feeling-unlock") })
+                Page.Settings -> SettingsPage(feelingMode, feelingBioEnabled, appLockEnabled, appBioEnabled,
+                    onRecycle = { page = Page.Recycle },
+                    onFeeling = {
+                        if (feelingMode == "OFF") askPin("feeling-enable", "设置感受 6 位口令")
+                        else confirmDisableFeeling = true
+                    },
+                    onFeelingBio = {
+                        if (feelingBioEnabled) scope.launch {
+                            runCatching { security.disableFeelingBiometric() }.onSuccess { securityEpoch++ }.onFailure(::report)
+                        } else if (security.isFeelingUnlocked()) tryBiometric("feeling-enable")
+                        else askPin("feeling-bio", "先验证感受口令")
+                    },
+                    onFeelingPinChange = {
+                        if (feelingBioEnabled) tryBiometric("feeling-unlock",
+                            after = { askPin("feeling-change-new", "设置新的感受 6 位口令") },
+                            fallback = { askPin("feeling-change-old", "验证当前感受口令") })
+                        else askPin("feeling-change-old", "验证当前感受口令")
+                    },
+                    onAppLock = {
+                        if (appLockEnabled) askPin("app-disable", "验证应用锁口令")
+                        else askPin("app-enable", "设置应用锁 6 位口令")
+                    },
+                    onAppBio = {
+                        if (appBioEnabled) scope.launch {
+                            runCatching { security.setAppLockBiometricEnabled(false) }.onSuccess { securityEpoch++ }.onFailure(::report)
+                        } else tryBiometric("app-enable")
+                    },
+                    onAppPinChange = {
+                        if (appBioEnabled) tryBiometric("app-change",
+                            after = { askPin("app-change-new", "设置新的应用锁 6 位口令") },
+                            fallback = { askPin("app-change-old", "验证当前应用锁口令") })
+                        else askPin("app-change-old", "验证当前应用锁口令")
+                    },
+                    onExport = { backupAction = "export" },
+                    onImport = { openBackup.launch(arrayOf("*/*")) },
+                )
+                Page.Recycle -> RecyclePage(recycled,
+                    onRestore = { id ->
+                        scope.launch {
+                            runCatching { repository.restore(id) }
+                                .onSuccess { snackbar.showSnackbar("已恢复到时间线") }
+                                .onFailure(::report)
+                        }
+                    },
+                    onDelete = { confirmDelete = it })
+                Page.Search -> SearchPage(repository, onOpen = { page = Page.Detail(it) }, report = ::report)
+                is Page.Detail -> DetailPage(repository, current.id, revealEpoch + securityEpoch,
+                    onEdit = { page = Page.Editor(current.id) },
+                    onDelete = {
+                        scope.launch {
+                            runCatching { repository.moveToRecycle(current.id) }
+                                .onSuccess { page = Page.Timeline }.onFailure(::report)
+                        }
+                    },
+                    onUnlock = { askPin("feeling-unlock", "解锁感受") },
+                    onBiometric = { tryBiometric("feeling-unlock") })
+                is Page.Editor -> EditorPage(repository, current.id, revealEpoch + securityEpoch,
+                    onSaved = { page = Page.Detail(it) },
+                    onCancel = { page = Page.Timeline },
+                    onUnlock = { askPin("feeling-unlock", "解锁感受") },
+                    report = ::report)
+            }
+        }
+    }
+    }
+
+    if (!locked) pinAction?.let { action ->
+        PinDialog(pinTitle, setup = action in setOf("feeling-enable", "app-enable", "feeling-change-new", "app-change-new"), onDismiss = {
+            pinAction = null
+            if (action == "feeling-export") { pendingExportUri = null; backupPassword = "" }
+            if (action == "feeling-import") { pendingImportPreview = null; backupPassword = ""; importUri = null }
+        }) { pin ->
+            pinAction = null
+            scope.launch {
+                runCatching {
+                    when (action) {
+                        "feeling-enable" -> repository.exclusive { security.enableFeeling(pin) }
+                        "feeling-unlock" -> check(security.unlockFeelingPin(pin)) { "感受口令错误或暂时被限制" }
+                        "feeling-export", "feeling-import" -> check(security.unlockFeelingPin(pin)) { "感受口令错误或暂时被限制" }
+                        "feeling-disable" -> { check(security.unlockFeelingPin(pin)) { "感受口令错误或暂时被限制" }; repository.exclusive { security.disableFeeling() } }
+                        "feeling-bio" -> { check(security.unlockFeelingPin(pin)) { "感受口令错误或暂时被限制" }; tryBiometric("feeling-enable") }
+                        "feeling-change-old" -> { check(security.unlockFeelingPin(pin)) { "感受口令错误或暂时被限制" }; askPin("feeling-change-new", "设置新的感受 6 位口令") }
+                        "feeling-change-new" -> security.resetFeelingPin(pin)
+                        "app-enable" -> { security.setAppLock(pin); refreshLockState() }
+                        "app-disable" -> { check(security.verifyAppLock(pin)) { "应用锁口令错误" }; security.disableAppLock(); refreshLockState() }
+                        "app-change-old" -> { check(security.verifyAppLock(pin)) { "应用锁口令错误" }; askPin("app-change-new", "设置新的应用锁 6 位口令") }
+                        "app-change-new" -> { security.setAppLock(pin); refreshLockState() }
+                    }
+                }.onSuccess { securityEpoch++ }.onFailure { error ->
+                    if (action == "feeling-export") { pendingExportUri = null; backupPassword = "" }
+                    if (action == "feeling-import") { pendingImportPreview = null; backupPassword = ""; importUri = null }
+                    report(error)
+                }
+            }
+        }
+    }
+    if (!locked) backupAction?.let { action ->
+        BackupPasswordDialog(if (action == "export") "设置备份口令" else "输入备份口令",
+            onDismiss = { backupAction = null; backupPassword = "" }) { password ->
+            backupAction = null
+            backupPassword = password
+            if (action == "export") {
+                createBackup.launch("imprints-${java.time.LocalDate.now()}.imprints")
+            }
+            else importUri?.let { uri -> scope.launch {
+                runCatching { backup.preview(uri, password.toCharArray()) }
+                    .onSuccess { backupPreview = it }.onFailure { report(it); backupPassword = "" }
+            } }
+        }
+    }
+    if (!locked) backupPreview?.let { preview ->
+        AlertDialog(onDismissRequest = { backupPreview = null; backupPassword = "" },
+            title = { Text("导入预览") },
+            text = { Text(buildString {
+                append("印迹 ${preview.entries} 条，附件 ${preview.attachments} 个；重复 ${preview.duplicates} 条，过期回收站 ${preview.expired} 条。")
+                append(" 待写入附件约 ${preview.attachmentBytes / (1024 * 1024)} MiB，导入期间需额外空间。")
+                if (preview.feelingMode == "ON" && feelingMode == "OFF") append(" 备份中的感受原为加密状态，导入本机后将以明文保存。")
+            }) },
+            confirmButton = { TextButton(onClick = {
+                backupPreview = null
+                if (importUri != null) pendingImportPreview = preview
+            }) { Text(if (preview.feelingMode == "ON" && feelingMode == "OFF") "明文导入" else "导入") } },
+            dismissButton = { TextButton(onClick = { backupPreview = null; backupPassword = "" }) { Text("取消") } })
+    }
+    if (!locked) confirmDelete?.let { id ->
+        AlertDialog(onDismissRequest = { confirmDelete = null }, title = { Text("彻底删除这条印迹？") },
+            text = { Text("原内容和附件将被删除。") },
+            confirmButton = { TextButton(onClick = {
+                confirmDelete = null
+                scope.launch { runCatching { repository.deletePermanently(id) }.onFailure(::report) }
+            }) { Text("删除") } },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("取消") } })
+    }
+    if (!locked && confirmDisableFeeling) AlertDialog(
+        onDismissRequest = { confirmDisableFeeling = false },
+        title = { Text("关闭感受加密？") },
+        text = { Text("关闭后，已有和新写入的感受将以明文保存在本机。关闭前需验证感受口令。") },
+        confirmButton = { TextButton(onClick = {
+            confirmDisableFeeling = false
+            askPin("feeling-disable", "验证感受 6 位口令")
+        }) { Text("确认关闭") } },
+        dismissButton = { TextButton(onClick = { confirmDisableFeeling = false }) { Text("取消") } },
+    )
+    if (locked) {
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).clickable { }) {
+            LockPage(
+                biometricAvailable = appBioEnabled,
+                onPin = { pin -> scope.launch { if (!unlockApp(pin)) snackbar.showSnackbar("口令错误或暂时被限制，请重试") } },
+                onBiometric = { tryBiometric("app-unlock") },
+            )
+        }
+    }
+    }
+}
+
+@Composable
+private fun LockPage(biometricAvailable: Boolean, onPin: (String) -> Unit, onBiometric: () -> Unit) {
+    var pin by remember { mutableStateOf("") }
+    Column(Modifier.fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.Center,
+        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+        Text("印迹", color = Green, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(14.dp))
+        Text("欢迎回来", color = Ink, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+        Text("输入 6 位口令，继续你的记录", color = Quiet, fontSize = 14.sp)
+        Spacer(Modifier.height(32.dp))
+        PinField(pin) { pin = it }
+        Spacer(Modifier.height(18.dp))
+        Button(onClick = { onPin(pin); pin = "" }, enabled = pin.length == 6,
+            modifier = Modifier.fillMaxWidth()) { Text("解锁") }
+        if (biometricAvailable) TextButton(onClick = onBiometric) { Text("使用生物识别") }
+    }
+}
+
+@Composable
+private fun PinField(value: String, onChange: (String) -> Unit) {
+    OutlinedTextField(value = value, onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) onChange(it) },
+        label = { Text("6 位数字口令") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+        singleLine = true, modifier = Modifier.fillMaxWidth(),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+        colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green))
+}
+
+@Composable
+private fun PinDialog(title: String, setup: Boolean, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var pin by remember(title) { mutableStateOf("") }
+    var confirm by remember(title) { mutableStateOf("") }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(title) },
+        text = { Column {
+            PinField(pin) { pin = it }
+            if (setup) { Spacer(Modifier.height(12.dp)); PinField(confirm) { confirm = it }; Text("再次输入确认口令") }
+        } },
+        confirmButton = { TextButton(onClick = { onConfirm(pin) }, enabled = pin.length == 6 && (!setup || pin == confirm)) { Text("确定") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp), containerColor = Color.White)
+}
+
+@Composable
+private fun SettingsPage(
+    feelingMode: String, feelingBio: Boolean, appLock: Boolean, appBio: Boolean,
+    onRecycle: () -> Unit, onFeeling: () -> Unit, onFeelingBio: () -> Unit, onFeelingPinChange: () -> Unit,
+    onAppLock: () -> Unit, onAppBio: () -> Unit, onAppPinChange: () -> Unit,
+    onExport: () -> Unit, onImport: () -> Unit,
+) {
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { Spacer(Modifier.height(10.dp)) }
+        item { Text("本机存储", color = Quiet, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
+        item { Text("印迹保存在本机。需要迁移时，可手动导出加密备份。",
+            color = Ink, fontSize = 15.sp, lineHeight = 23.sp) }
+        item { Spacer(Modifier.height(8.dp)) }
+        item { SettingsAction("回收站", "删除的印迹保留 7 天", onClick = onRecycle) }
+        item { Spacer(Modifier.height(8.dp)) }
+        item { Text("隐私与安全", color = Quiet, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
+        item { SettingsAction(if (feelingMode == "ON") "关闭感受加密" else "开启感受加密",
+            if (feelingMode == "ON") "已加密保存 · 查看时仍需刮开" else "默认本机明文保存 · 查看时需刮开",
+            onClick = onFeeling) }
+        if (feelingMode == "ON") {
+            item { SettingsAction("修改感受口令", "6 位数字", onClick = onFeelingPinChange) }
+            item { SettingsAction(if (feelingBio) "关闭感受生物识别" else "开启感受生物识别",
+                "用于查看加密感受", onClick = onFeelingBio) }
+        }
+        item { SettingsAction(if (appLock) "关闭应用锁" else "开启应用锁",
+            if (appLock) "已保护整个应用" else "打开应用时验证 6 位口令", onClick = onAppLock) }
+        if (appLock) {
+            item { SettingsAction("修改应用锁口令", "6 位数字", onClick = onAppPinChange) }
+            item { SettingsAction(if (appBio) "关闭应用锁生物识别" else "开启应用锁生物识别",
+                "用于解锁应用", onClick = onAppBio) }
+        }
+        item { Spacer(Modifier.height(8.dp)) }
+        item { Text("数据备份", color = Quiet, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
+        item { SettingsAction("导出加密备份", "保存到你选择的位置", onClick = onExport) }
+        item { SettingsAction("导入备份", "从本地文件恢复印迹", onClick = onImport) }
+        item { Text("本地保存 · 手动备份", Modifier.fillMaxWidth().padding(vertical = 40.dp),
+            color = Green, fontSize = 13.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
+    }
+}
+
+@Composable
+private fun BackupPasswordDialog(title: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var password by remember(title) { mutableStateOf("") }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(title) },
+        text = { OutlinedTextField(password, { password = it }, label = { Text("至少 8 位") },
+            visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+            colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green)) },
+        confirmButton = { TextButton(onClick = { onConfirm(password) }, enabled = password.length >= 8) { Text("继续") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp), containerColor = Color.White)
+}
+
+@Composable
+private fun RecyclePage(entries: List<EntryEntity>, onRestore: (String) -> Unit, onDelete: (String) -> Unit) {
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item { OutlinePanel(Modifier.fillMaxWidth()) {
+            Text("删除的印迹会在这里保留 7 天，之后自动清除。", Modifier.padding(18.dp),
+                color = Quiet, fontSize = 14.sp, lineHeight = 22.sp)
+        } }
+        item { Text("${entries.size} 条印迹", Modifier.padding(top = 10.dp), color = Quiet, fontSize = 14.sp) }
+        if (entries.isEmpty()) item { Text("回收站是空的", Modifier.fillMaxWidth().padding(vertical = 52.dp),
+            color = Quiet, textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
+        items(entries, key = { it.id }) { entry ->
+            OutlinePanel(Modifier.fillMaxWidth()) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                Text(entry.body.ifBlank { "媒体印迹" }, color = Ink, fontSize = 16.sp, maxLines = 2)
+                Text(entry.deletedAtMs?.let(::RecycleCountdown) ?: "", color = Quiet, fontSize = 12.sp)
+                FineDivider()
+                Row { TextButton(onClick = { onRestore(entry.id) }) { Text("恢复", color = Green) }
+                    TextButton(onClick = { onDelete(entry.id) }) { Text("彻底删除", color = Quiet) } }
+            } }
+        }
+    }
+}
+
+@Composable
+private fun SearchPage(repository: ImprintRepository, onOpen: (String) -> Unit,
+    report: (Throwable) -> Unit) {
+    var query by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf(emptyList<EntryEntity>()) }
+    LaunchedEffect(query) {
+        if (query.isBlank()) results = emptyList()
+        else runCatching { repository.searchBody(query) }.onSuccess { results = it }.onFailure(report)
+    }
+    Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
+        OutlinedTextField(query, { query = it }, placeholder = { Text("搜索印迹正文") },
+            modifier = Modifier.fillMaxWidth(), singleLine = true,
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+            colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green))
+        Spacer(Modifier.height(20.dp))
+        if (query.isBlank()) Text("输入关键词，找回一段印迹", Modifier.fillMaxWidth().padding(top = 44.dp),
+            color = Quiet, textAlign = androidx.compose.ui.text.style.TextAlign.Center, fontSize = 14.sp)
+        if (query.isNotBlank()) Text("找到 ${results.size} 条印迹", color = Quiet, fontSize = 13.sp)
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) { items(results, key = { it.id }) { entry ->
+            Column(Modifier.fillMaxWidth().clickable { onOpen(entry.id) }.padding(vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(entry.eventLocalMinute.replace('T', ' '), color = Quiet, fontSize = 12.sp)
+                Text(entry.body, color = Ink, fontSize = 16.sp, lineHeight = 24.sp, maxLines = 3)
+                FineDivider()
+            }
+        } }
+    }
+}
