@@ -13,7 +13,14 @@ ksp = "2.3.12"
 navigation = "2.9.8"
 media3 = "1.11.1"
 work = "2.11.1"
+# biometric 1.1.0 会把 fragment 钉在 1.2.5；其 FragmentActivity 对 requestCode
+# 强校验「仅低 16 位」，与 activity 1.13+ ActivityResultRegistry 高位随机码冲突，
+# 选图/音频/权限 launch 必现 crash。fragment 1.3.0+ 已移除该校验。
+# 与 Penly 一致：钉 stable 1.9.0 + fragment-ktx。
 biometric = "1.1.0"
+fragmentKtx = "1.9.0"
+# 高德搜索（POI 关键字/周边）；地图预览不嵌入，仅外部 geo:/URI 导航
+amapSearch = "9.7.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -39,6 +46,9 @@ androidx-media3-exoplayer = { group = "androidx.media3", name = "media3-exoplaye
 androidx-media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "media3" }
 androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work" }
 androidx-biometric = { group = "androidx.biometric", name = "biometric", version.ref = "biometric" }
+# 显式升级 fragment ≥1.3.0：见 [versions] fragmentKtx 注释
+androidx-fragment-ktx = { group = "androidx.fragment", name = "fragment-ktx", version.ref = "fragmentKtx" }
+amap-search = { group = "com.amap.api", name = "search", version.ref = "amapSearch" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

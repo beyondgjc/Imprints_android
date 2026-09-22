@@ -4,17 +4,11 @@ import android.app.DatePickerDialog
 import android.app.Dialog
 import android.app.TimePickerDialog
 import android.net.Uri
-import android.Manifest
-import android.content.Context
-import android.location.LocationListener
-import android.location.LocationManager
-import android.os.Build
-import android.os.Looper
-import androidx.core.content.ContextCompat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -23,9 +17,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -62,6 +56,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
@@ -76,7 +72,6 @@ import com.beyondguo.imprints.data.ImprintRepository
 import com.beyondguo.imprints.data.MediaChoice
 import com.beyondguo.imprints.data.PlaceEntity
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.delay
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.util.UUID
@@ -108,6 +103,7 @@ fun EditorPage(
     var eventTime by remember(id) { mutableStateOf(EntryDraft().eventLocalMinute) }
     var placeName by remember(id) { mutableStateOf("") }
     var selectedPlace by remember(id) { mutableStateOf<PlaceEntity?>(null) }
+    var showLocationPicker by remember(id) { mutableStateOf(false) }
     val visuals = remember(id) { mutableStateListOf<MediaChoice>() }
     var audio by remember(id) { mutableStateOf<AudioChoice?>(null) }
     var loading by remember(id) { mutableStateOf(id != null) }
@@ -130,7 +126,7 @@ fun EditorPage(
         if (initial != null && initial != snapshot()) exitRequested = true
         else { discardPending(); onCancel() }
     }
-    BackHandler { requestExit() }
+    BackHandler(enabled = !showLocationPicker) { requestExit() }
 
     LaunchedEffect(id, epoch) {
         if (id == null) {
@@ -191,31 +187,6 @@ fun EditorPage(
             }.onFailure(report)
         }
     }
-    fun requestLocation() {
-        val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        val provider = when {
-            manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
-            manager.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
-            else -> { report(IllegalStateException("系统定位不可用")); return }
-        }
-        fun accept(location: android.location.Location?) {
-            if (location == null) { report(IllegalStateException("暂未获取到当前位置")); return }
-            selectedPlace = PlaceEntity(UUID.randomUUID().toString(), "当前位置", "", location.latitude, location.longitude, "WGS84", "DEVICE", null)
-            placeName = selectedPlace!!.name
-        }
-        try {
-            if (Build.VERSION.SDK_INT >= 30) {
-                manager.getCurrentLocation(provider, null, ContextCompat.getMainExecutor(context)) { accept(it) }
-            } else {
-                val listener = object : LocationListener { override fun onLocationChanged(location: android.location.Location) { accept(location) } }
-                manager.requestSingleUpdate(provider, listener, Looper.getMainLooper())
-                scope.launch { delay(12_000); manager.removeUpdates(listener) }
-            }
-        } catch (error: SecurityException) { report(error) }
-    }
-    val locationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) requestLocation() else report(IllegalStateException("未获得定位权限，可继续保存印迹"))
-    }
 
     if (loading) { Text("正在加载…", Modifier.padding(20.dp)); return }
     if (blocked) {
@@ -244,6 +215,26 @@ fun EditorPage(
             saving = false
         }
     }
+
+    if (showLocationPicker) {
+        LocationPickerPage(
+            selected = selectedPlace,
+            onSelect = { place ->
+                selectedPlace = place
+                placeName = place?.name.orEmpty()
+                showLocationPicker = false
+            },
+            onBack = { showLocationPicker = false },
+            report = report,
+        )
+        if (exitRequested && !LocalImprintsLocked.current) AlertDialog(onDismissRequest = { exitRequested = false },
+            title = { Text("放弃未保存的修改？") },
+            text = { Text("当前输入和新选的附件尚未保存。") },
+            confirmButton = { TextButton(onClick = { exitRequested = false; discardPending(); onCancel() }) { Text("放弃") } },
+            dismissButton = { TextButton(onClick = { exitRequested = false }) { Text("继续编辑") } })
+        return
+    }
+
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
             IconButton(onClick = ::requestExit, modifier = Modifier.align(Alignment.CenterStart)) {
@@ -295,53 +286,22 @@ fun EditorPage(
         item { FineDivider() }
         item { SectionTitle("图片 / 动图 / 视频") }
         item {
-            Surface(Modifier.size(112.dp).clickable {
-                when (9 - visuals.size) {
-                    0 -> report(IllegalStateException("图片、动图、视频最多 9 个"))
-                    1 -> singlePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
-                    else -> multiPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
-                }
-            }, shape = RoundedCornerShape(16.dp), color = Color(0xFFF8FCFA),
-                border = BorderStroke(1.dp, Color(0xFFA8E7C4))) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                    Icon(Icons.Default.Add, null, tint = Green)
-                    Text("添加 · ${visuals.size}/9", color = Quiet, fontSize = 12.sp)
-                }
-            }
-        }
-        item {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp), maxItemsInEachRow = 3) {
-            visuals.toList().forEachIndexed { index, choice ->
-            Column(Modifier.width(100.dp)) {
-                val file = when (choice) {
-                    is MediaChoice.Existing -> repository.files.resolve(choice.value.relativePath)
-                    is MediaChoice.New -> choice.value.pendingFile
-                }
-                val kind = when (choice) {
-                    is MediaChoice.Existing -> choice.value.kind
-                    is MediaChoice.New -> choice.value.kind
-                }
-                MediaThumbnail(file, kind)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("←", Modifier.clickable(enabled = index > 0) {
-                            val previous = visuals[index - 1]
-                            visuals[index - 1] = visuals[index]
-                            visuals[index] = previous
-                        }.padding(5.dp), color = if (index > 0) Quiet else Line, fontSize = 17.sp)
-                    Text("→", Modifier.clickable(enabled = index < visuals.lastIndex) {
-                            val next = visuals[index + 1]
-                            visuals[index + 1] = visuals[index]
-                            visuals[index] = next
-                        }.padding(5.dp), color = if (index < visuals.lastIndex) Quiet else Line, fontSize = 17.sp)
-                    Text("×", Modifier.clickable {
-                            val removed = visuals.removeAt(index)
-                            if (removed is MediaChoice.New) repository.files.discard(removed.value)
-                        }.padding(5.dp), color = Quiet, fontSize = 17.sp)
-                }
-            }
-            }
-            }
+            EditorMediaGrid(
+                visuals = visuals,
+                repository = repository,
+                onAdd = {
+                    when (EntryRules.MAX_VISUALS - visuals.size) {
+                        0 -> report(IllegalStateException("最多可添加 9 张图片、动图或视频"))
+                        1 -> singlePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                        else -> multiPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                    }
+                },
+                onRemove = { index ->
+                    val removed = visuals.removeAt(index)
+                    if (removed is MediaChoice.New) repository.files.discard(removed.value)
+                },
+                report = report,
+            )
         }
         item {
             SectionTitle("音频")
@@ -362,13 +322,30 @@ fun EditorPage(
             }
         }
         item {
-            SectionTitle("位置")
-            Spacer(Modifier.height(12.dp))
-            OutlinedTextField(placeName, { placeName = it; selectedPlace = null },
-                placeholder = { Text("添加地点名称（可选）", color = Quiet) }, modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green))
-            TextButton(onClick = { locationPermission.launch(Manifest.permission.ACCESS_COARSE_LOCATION) }) { Text("使用当前位置") }
+            // 微信式：仅一行入口，默认不展示位置控件
+            Row(
+                Modifier.fillMaxWidth()
+                    .clickable { showLocationPicker = true }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Default.LocationOn,
+                    null,
+                    tint = if (selectedPlace != null || placeName.isNotBlank()) Green else Quiet,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    selectedPlace?.name?.takeIf { it.isNotBlank() }
+                        ?: placeName.trim().takeIf { it.isNotBlank() }
+                        ?: "所在位置",
+                    Modifier.weight(1f),
+                    color = if (selectedPlace != null || placeName.isNotBlank()) Ink else Quiet,
+                    fontSize = 15.sp,
+                )
+                Text("›", color = Quiet, fontSize = 20.sp)
+            }
         }
         item {
             SectionTitle("感受")
@@ -386,10 +363,10 @@ fun EditorPage(
     }
 
     extraUris?.takeUnless { LocalImprintsLocked.current }?.let { uris ->
-        val remaining = (9 - visuals.size).coerceAtLeast(0)
-        AlertDialog(onDismissRequest = { extraUris = null }, title = { Text("超过媒体上限") },
-            text = { Text("本次选了 ${uris.size} 个，只能再添加 $remaining 个。是否加入前 $remaining 个？") },
-            confirmButton = { TextButton(onClick = { extraUris = null; prepareUris(uris.take(remaining)) }) { Text("确认") } },
+        val remaining = (EntryRules.MAX_VISUALS - visuals.size).coerceAtLeast(0)
+        AlertDialog(onDismissRequest = { extraUris = null }, title = { Text("最多可添加 9 张") },
+            text = { Text("本次选了 ${uris.size} 张，最多还可以选择 $remaining 张。是否加入前 $remaining 张？") },
+            confirmButton = { TextButton(onClick = { extraUris = null; prepareUris(uris.take(remaining)) }) { Text("我知道了") } },
             dismissButton = { TextButton(onClick = { extraUris = null }) { Text("取消") } })
     }
     if (exitRequested && !LocalImprintsLocked.current) AlertDialog(onDismissRequest = { exitRequested = false },
@@ -397,4 +374,126 @@ fun EditorPage(
         text = { Text("当前输入和新选的附件尚未保存。") },
         confirmButton = { TextButton(onClick = { exitRequested = false; discardPending(); onCancel() }) { Text("放弃") } },
         dismissButton = { TextButton(onClick = { exitRequested = false }) { Text("继续编辑") } })
+}
+
+/**
+ * 朋友圈式编辑媒体网格：已选图在前，「+」添加框固定在末尾（满 9 张不显示）；
+ * 长按拖动可调整顺序，角标 × 删除。
+ */
+@Composable
+private fun EditorMediaGrid(
+    visuals: androidx.compose.runtime.snapshots.SnapshotStateList<MediaChoice>,
+    repository: ImprintRepository,
+    onAdd: () -> Unit,
+    onRemove: (Int) -> Unit,
+    report: (Throwable) -> Unit,
+) {
+    val columns = 3
+    val gap = 8.dp
+    var dragIndex by remember(visuals.size) { mutableStateOf(-1) }
+    var dragOffset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+    val canAdd = visuals.size < EntryRules.MAX_VISUALS
+    val cells = visuals.size + if (canAdd) 1 else 0
+    val rows = (cells + columns - 1) / columns
+
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap)) {
+        repeat(rows) { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                repeat(columns) { col ->
+                    val index = row * columns + col
+                    Box(Modifier.weight(1f).aspectRatio(1f)) {
+                        when {
+                            index < visuals.size -> {
+                                val choice = visuals[index]
+                                val file = when (choice) {
+                                    is MediaChoice.Existing -> repository.files.resolve(choice.value.relativePath)
+                                    is MediaChoice.New -> choice.value.pendingFile
+                                }
+                                val kind = when (choice) {
+                                    is MediaChoice.Existing -> choice.value.kind
+                                    is MediaChoice.New -> choice.value.kind
+                                }
+                                val isDragging = dragIndex == index
+                                Box(
+                                    Modifier
+                                        .fillMaxSize()
+                                        .graphicsLayer {
+                                            if (isDragging) {
+                                                scaleX = 1.05f
+                                                scaleY = 1.05f
+                                                translationX = dragOffset.x
+                                                translationY = dragOffset.y
+                                                shadowElevation = 12f
+                                                alpha = 0.92f
+                                            }
+                                        }
+                                        .pointerInput(index, visuals.size) {
+                                            detectDragGesturesAfterLongPress(
+                                                onDragStart = {
+                                                    dragIndex = index
+                                                    dragOffset = androidx.compose.ui.geometry.Offset.Zero
+                                                },
+                                                onDrag = { change, amount ->
+                                                    change.consume()
+                                                    dragOffset += amount
+                                                    // 拖过半格时与目标格交换
+                                                    val cell = size.width.toFloat()
+                                                    val from = dragIndex
+                                                    if (from >= 0 && from < visuals.size) {
+                                                        val dx = dragOffset.x
+                                                        val dy = dragOffset.y
+                                                        val col = from % columns
+                                                        val rowI = from / columns
+                                                        var target = -1
+                                                        when {
+                                                            dx > cell * 0.5f && col < columns - 1 &&
+                                                                (rowI * columns + col + 1) < visuals.size -> target = from + 1
+                                                            dx < -cell * 0.5f && col > 0 -> target = from - 1
+                                                            dy > cell * 0.5f && (rowI + 1) * columns + col < visuals.size -> target = from + columns
+                                                            dy < -cell * 0.5f && rowI > 0 -> target = from - columns
+                                                        }
+                                                        if (target in visuals.indices && target != from) {
+                                                            val item = visuals.removeAt(from)
+                                                            visuals.add(target, item)
+                                                            dragIndex = target
+                                                            dragOffset = androidx.compose.ui.geometry.Offset.Zero
+                                                        }
+                                                    }
+                                                },
+                                                onDragEnd = { dragIndex = -1; dragOffset = androidx.compose.ui.geometry.Offset.Zero },
+                                                onDragCancel = { dragIndex = -1; dragOffset = androidx.compose.ui.geometry.Offset.Zero },
+                                            )
+                                        }
+                                ) {
+                                    MediaThumbnail(file, kind, Modifier.fillMaxSize())
+                                    Text("×",
+                                        Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(4.dp)
+                                            .background(Color(0x66000000), RoundedCornerShape(50))
+                                            .clickable { onRemove(index) }
+                                            .padding(horizontal = 7.dp, vertical = 2.dp),
+                                        color = Color.White, fontSize = 14.sp)
+                                }
+                            }
+                            canAdd && index == visuals.size -> {
+                                Surface(
+                                    Modifier.fillMaxSize().clickable(onClick = onAdd),
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = Color(0xFFF3F3F3),
+                                    border = BorderStroke(1.dp, Color(0xFFE0E0E0)),
+                                ) {
+                                    Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.Center) {
+                                        Icon(Icons.Default.Add, null, tint = Color(0xFF999999), modifier = Modifier.size(36.dp))
+                                        Text("${visuals.size}/9", color = Color(0xFF999999), fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

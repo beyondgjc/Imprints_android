@@ -17,10 +17,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -74,7 +79,7 @@ private object PlaybackFocus {
 }
 
 @Composable
-fun MediaThumbnail(file: File, kind: String) {
+fun MediaThumbnail(file: File, kind: String, modifier: Modifier = Modifier) {
     val appLocked = LocalImprintsLocked.current
     var open by remember(file.path) { mutableStateOf(false) }
     val bitmap by produceState<Bitmap?>(null, file.path) {
@@ -94,10 +99,10 @@ fun MediaThumbnail(file: File, kind: String) {
             }.getOrNull()
         }
     }
-    Box(Modifier.size(100.dp).clip(RoundedCornerShape(14.dp)).background(Color(0xFFE7F4EE))
+    Box(modifier.clip(RoundedCornerShape(10.dp)).background(Color(0xFFE7F4EE))
         .clickable { open = true }, contentAlignment = Alignment.Center) {
         if (bitmap == null) Text(if (kind == "VIDEO") "视频" else "图片", color = Quiet)
-        else Image(bitmap!!.asImageBitmap(), null, Modifier.size(100.dp), contentScale = ContentScale.Crop)
+        else Image(bitmap!!.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         if (kind == "VIDEO") Surface(shape = CircleShape, color = Color(0xB3222830)) {
             Icon(Icons.Default.PlayArrow, null, Modifier.padding(5.dp), tint = Color.White)
         }
@@ -113,6 +118,40 @@ fun MediaThumbnail(file: File, kind: String) {
                 else -> bitmap?.let { Image(it.asImageBitmap(), null, Modifier.fillMaxWidth(), contentScale = ContentScale.Fit) }
             } },
             confirmButton = { TextButton(onClick = { open = false }) { Text("关闭") } })
+    }
+}
+
+/**
+ * 朋友圈式图片网格：1 张大图；4 张 2×2；其余 3 列方格，全部展示不折叠。
+ * cells 为 (file, kind) 列表。
+ */
+@Composable
+fun MomentsMediaGrid(cells: List<Pair<File, String>>, modifier: Modifier = Modifier) {
+    if (cells.isEmpty()) return
+    val gap = 6.dp
+    if (cells.size == 1) {
+        val (file, kind) = cells.first()
+        MediaThumbnail(file, kind, modifier
+            .widthIn(max = 240.dp)
+            .heightIn(max = 240.dp)
+            .aspectRatio(1f, matchHeightConstraintsFirst = false))
+        return
+    }
+    val columns = when {
+        cells.size == 4 -> 2
+        else -> 3
+    }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(gap)) {
+        cells.chunked(columns).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                row.forEach { (file, kind) ->
+                    MediaThumbnail(file, kind, Modifier.weight(1f, fill = true).aspectRatio(1f))
+                }
+                repeat(columns - row.size) {
+                    Spacer(Modifier.weight(1f, fill = true).aspectRatio(1f))
+                }
+            }
+        }
     }
 }
 
