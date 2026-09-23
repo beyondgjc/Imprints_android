@@ -36,8 +36,8 @@ android {
         applicationId = "com.beyondguo.imprints"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 占位符供 AndroidManifest 的 com.amap.api.v2.apikey 使用
