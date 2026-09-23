@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  印迹启动图标单色前景（Android 13+ 主题图标 / monochrome 层专用）。
+  规则：系统按 alpha 取形状后自行上色，因此只能出现纯白填充。
+
+  为什么这里不含金星：彩色层靠「颜色」区分白卡与金星，而单色层两者同色会糊成
+  一团（金星四角会从卡片边缘戳出来变成异物）。原始几何下卡片几乎占满可见区
+  （右下角距中心 35.4dp，遮罩半径 36dp），没有余量把金星挪出去断开。
+  因此单色层只保留「卡片 + 刮痕镂空」这一组可辨识的形状。
+  坐标与彩色版完全一致。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 白卡 − 对角刮痕（evenOdd 镂空） -->
+    <path
+        android:fillType="evenOdd"
+        android:fillColor="#FFFFFF"
+        android:pathData="M40,30
+            L68,30
+            Q80,30 80,42
+            L80,66
+            Q80,78 68,78
+            L40,78
+            Q28,78 28,66
+            L28,42
+            Q28,30 40,30
+            Z
+            M36.5,64.5
+            L63.5,37.5
+            L70.5,44.5
+            L43.5,71.5
+            Z" />
+</vector>

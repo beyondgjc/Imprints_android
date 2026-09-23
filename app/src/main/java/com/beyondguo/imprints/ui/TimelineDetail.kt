@@ -363,90 +363,123 @@ fun FeelingCard(
                 }
             }
         }
-    } else text?.let { ScratchFeeling(it, epoch) }
+    } else text?.let { ScratchFeeling(it, epoch, feeling.entryId) }
 }
 
-@Composable
-private fun ScratchFeeling(text: String, epoch: Int) {
-    val points = remember(text, epoch) { mutableStateListOf<Offset>() }
-    val visited = remember(text, epoch) { mutableSetOf<Pair<Int, Int>>() }
-    var size by remember(text, epoch) { mutableStateOf(IntSize.Zero) }
-    var phase by remember(text, epoch) { mutableStateOf(ScratchPhase.Covered) }
-    var showStars by remember(text, epoch) { mutableStateOf(false) }
-    LaunchedEffect(showStars) {
-        if (showStars) { delay(950); showStars = false }
+/**
+ * 会话内「已刮开」记忆：同一 epoch（解锁/安全状态）保持，epoch 变化（如重新上锁再解锁）清空。
+ * 无「一键全开」按钮。
+ */
+private object ScratchRevealStore {
+    private var epoch: Int = Int.MIN_VALUE
+    private val ids = mutableSetOf<String>()
+
+    fun isRevealed(id: String, epoch: Int): Boolean {
+        sync(epoch)
+        return id in ids
     }
-    LaunchedEffect(phase) {
-        if (phase == ScratchPhase.Fading) {
-            delay(450)
-            phase = ScratchPhase.Revealed
+
+    fun mark(id: String, epoch: Int) {
+        sync(epoch)
+        ids.add(id)
+    }
+
+    private fun sync(epoch: Int) {
+        if (this.epoch != epoch) {
+            this.epoch = epoch
+            ids.clear()
         }
+    }
+}
+
+/**
+ * 真实局部刮卡：
+ * - 底层始终是完整感受文字；涂层盖在上面，刮到哪露出哪（无阈值前全局淡出）。
+ * - 多笔累计刮开面积 ≥ 80% → 全开，并金色粒子提示。
+ * - 已刮开在本 epoch 内保持，直到 lock/epoch 变化。
+ */
+@Composable
+private fun ScratchFeeling(text: String, epoch: Int, feelingId: String) {
+    val points = remember(feelingId, epoch) { mutableStateListOf<Offset>() }
+    val visited = remember(feelingId, epoch) { mutableSetOf<Pair<Int, Int>>() }
+    var size by remember(feelingId, epoch) { mutableStateOf(IntSize.Zero) }
+    var phase by remember(feelingId, epoch) {
+        mutableStateOf(
+            if (ScratchRevealStore.isRevealed(feelingId, epoch)) ScratchPhase.Revealed
+            else ScratchPhase.Covered
+        )
+    }
+    var showStars by remember(feelingId, epoch) {
+        // 已刮开再进入：不再每次放烟花
+        mutableStateOf(false)
+    }
+    LaunchedEffect(showStars) {
+        if (showStars) { delay(1100); showStars = false }
     }
     val cellPx = with(LocalDensity.current) { 16.dp.toPx() }
     val eraseRadius = with(LocalDensity.current) { 15.dp.toPx() }
-    val covered = phase != ScratchPhase.Revealed
+    val revealed = phase == ScratchPhase.Revealed
 
-    // 设计稿：矮条未刮开（84→72dp），刮开后按内容自适应
-    val boxModifier = if (phase == ScratchPhase.Revealed) {
-        Modifier.fillMaxWidth().background(PaleGreen, RoundedCornerShape(12.dp))
-    } else {
-        Modifier.fillMaxWidth().height(72.dp).background(PaleGreen, RoundedCornerShape(12.dp))
-            .onSizeChanged { size = it }
-    }
-
-    Box(boxModifier) {
-        if (phase == ScratchPhase.Revealed) {
-            Text(text, Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-                color = Ink, lineHeight = 25.sp)
-        } else {
-            // 涂层内容始终铺满文字区域，便于刮除时露出正文
-            if (phase == ScratchPhase.Fading) {
-                Text(text, Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-                    color = Ink, lineHeight = 25.sp)
-            }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .background(PaleGreen, RoundedCornerShape(12.dp))
+            .onSizeChanged { size = it },
+    ) {
+        // 底层：完整文字始终存在，刮开处即可读
+        Text(
+            text,
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            color = Ink,
+            lineHeight = 25.sp,
+        )
+        if (!revealed) {
             Canvas(
                 Modifier
                     .matchParentSize()
                     .clip(RoundedCornerShape(12.dp))
                     .graphicsLayer {
                         compositingStrategy = CompositingStrategy.Offscreen
-                        alpha = if (phase == ScratchPhase.Fading) 0f else 1f
                     }
-                    .pointerInput(text, epoch, size) {
+                    .pointerInput(feelingId, epoch, size) {
                         detectDragGestures(
-                            onDragStart = {
-                                points.add(it)
-                                visited.clear()
-                                markCells(it, cellPx, size, visited)
+                            onDragStart = { offset ->
+                                points.add(offset)
+                                // 多笔累计，不在此清空 visited
+                                markCells(offset, cellPx, size, visited)
                             },
                             onDrag = { change, _ ->
-                                if (phase == ScratchPhase.Covered) {
-                                    points.add(change.position)
-                                    markCells(change.position, cellPx, size, visited)
-                                    val columns = (size.width / cellPx).toInt() + 1
-                                    val rows = (size.height / cellPx).toInt() + 1
-                                    val total = columns * rows
-                                    if (total > 0 && visited.size.toFloat() / total > 0.55f) {
-                                        phase = ScratchPhase.Fading
-                                        showStars = true
-                                    }
-                                    change.consume()
+                                points.add(change.position)
+                                markCells(change.position, cellPx, size, visited)
+                                val columns = (size.width / cellPx).toInt() + 1
+                                val rows = (size.height / cellPx).toInt() + 1
+                                val total = columns * rows
+                                if (total > 0 && visited.size.toFloat() / total >= 0.80f) {
+                                    phase = ScratchPhase.Revealed
+                                    ScratchRevealStore.mark(feelingId, epoch)
+                                    showStars = true
                                 }
+                                change.consume()
                             },
                         )
                     }
             ) {
-                // 设计稿：品牌绿实底 + 细斜纹 + 四角星高光（无文字）
+                // 品牌绿涂层 + 细斜纹 + 白色高光星
                 drawRect(Green)
                 val stripe = Color.White.copy(alpha = 0.14f)
                 val stripeStep = 9.dp.toPx()
                 var x = -size.height.toFloat()
                 while (x < size.width + size.height) {
-                    drawLine(stripe, Offset(x, 0f), Offset(x + size.height, size.height.toFloat()),
-                        strokeWidth = 3.dp.toPx())
+                    drawLine(
+                        stripe,
+                        Offset(x, 0f),
+                        Offset(x + size.height, size.height.toFloat()),
+                        strokeWidth = 3.dp.toPx(),
+                    )
                     x += stripeStep
                 }
-                // 四枚四角星（相对比例，对齐原型 paintScratch）
                 val stars = listOf(
                     Triple(0.16f, 0.35f, 0.11f),
                     Triple(0.44f, 0.70f, 0.08f),
@@ -455,25 +488,28 @@ private fun ScratchFeeling(text: String, epoch: Int) {
                 )
                 val starColor = Color.White.copy(alpha = 0.35f)
                 for ((fx, fy, fr) in stars) {
-                    val cx = size.width * fx
-                    val cy = size.height * fy
-                    val r = minOf(size.width, size.height) * fr
-                    drawSparkle(cx, cy, r, starColor)
+                    drawSparkle(size.width * fx, size.height * fy, minOf(size.width, size.height) * fr, starColor)
                 }
-                // 刮除轨迹
-                points.firstOrNull()?.let { drawCircle(Color.Transparent, eraseRadius, it, blendMode = BlendMode.Clear) }
+                // 局部刮除：只清笔迹，其余涂层保留
+                points.firstOrNull()?.let {
+                    drawCircle(Color.Transparent, eraseRadius, it, blendMode = BlendMode.Clear)
+                }
                 points.zipWithNext().forEach { (a, b) ->
-                    drawLine(Color.Transparent, a, b, strokeWidth = eraseRadius * 2,
-                        cap = StrokeCap.Round, blendMode = BlendMode.Clear)
+                    drawLine(
+                        Color.Transparent, a, b,
+                        strokeWidth = eraseRadius * 2,
+                        cap = StrokeCap.Round,
+                        blendMode = BlendMode.Clear,
+                    )
                 }
             }
         }
-        // 揭开瞬间：16 粒星星爆发（金/绿/白），约 950ms
-        if (showStars) ScratchBurst(modifier = Modifier.matchParentSize())
+        // 全开瞬间：金色为主的粒子提示
+        if (showStars) GoldScratchBurst(modifier = Modifier.matchParentSize())
     }
 }
 
-private enum class ScratchPhase { Covered, Fading, Revealed }
+private enum class ScratchPhase { Covered, Revealed }
 
 private fun markCells(p: Offset, cellPx: Float, size: IntSize, out: MutableSet<Pair<Int, Int>>) {
     val x = (p.x / cellPx).toInt()
@@ -502,34 +538,97 @@ private fun DrawScope.drawSparkle(
     drawPath(path, color)
 }
 
+/**
+ * 全开后的「金闪闪」：沿卡片四周偏下区域闪烁的四角星/短芒。
+ * 约 0.75s，较密、整体略靠下。
+ */
 @Composable
-private fun ScratchBurst(modifier: Modifier = Modifier) {
-    // 与原型 burstScratch 一致：16 粒，#F2CE7B / #07C160 / #FFFFFF
-    val colors = listOf(Color(0xFFF2CE7B), Green, Color.White)
-    val particles = remember {
-        List(16) { i ->
-            BurstParticle(
-                color = colors[i % 3],
-                size = 6f + ((i * 37) % 9),
-                dx = ((i * 53) % 221 - 110).toFloat(),
-                dy = -10f - ((i * 41) % 131).toFloat(),
+private fun GoldScratchBurst(modifier: Modifier = Modifier) {
+    val gold = Color(0xFFF2CE7B)
+    val goldBright = Color(0xFFFFF0B0)
+    // 相对位置：四角+边中点+加密点缀；y 整体略下沉
+    val sparks = remember {
+        listOf(
+            // 四角（略下移）
+            Triple(0.06f, 0.18f, 0f),
+            Triple(0.94f, 0.18f, 0.05f),
+            Triple(0.94f, 0.92f, 0.10f),
+            Triple(0.06f, 0.92f, 0.15f),
+            // 四边中点
+            Triple(0.50f, 0.12f, 0.08f),
+            Triple(0.97f, 0.55f, 0.12f),
+            Triple(0.50f, 0.97f, 0.18f),
+            Triple(0.03f, 0.55f, 0.22f),
+            // 上边加密
+            Triple(0.22f, 0.10f, 0.20f),
+            Triple(0.38f, 0.08f, 0.26f),
+            Triple(0.62f, 0.08f, 0.24f),
+            Triple(0.78f, 0.10f, 0.30f),
+            // 右边加密
+            Triple(0.96f, 0.32f, 0.28f),
+            Triple(0.97f, 0.42f, 0.34f),
+            Triple(0.96f, 0.68f, 0.32f),
+            Triple(0.95f, 0.78f, 0.38f),
+            // 下边加密（更密、更靠下）
+            Triple(0.18f, 0.96f, 0.36f),
+            Triple(0.32f, 0.98f, 0.42f),
+            Triple(0.46f, 0.97f, 0.40f),
+            Triple(0.60f, 0.98f, 0.46f),
+            Triple(0.74f, 0.96f, 0.44f),
+            Triple(0.88f, 0.95f, 0.48f),
+            // 左边加密
+            Triple(0.04f, 0.32f, 0.30f),
+            Triple(0.03f, 0.42f, 0.36f),
+            Triple(0.04f, 0.68f, 0.34f),
+            Triple(0.05f, 0.78f, 0.40f),
+            // 内圈贴近边缘的一圈（仍偏下）
+            Triple(0.14f, 0.88f, 0.50f),
+            Triple(0.40f, 0.90f, 0.54f),
+            Triple(0.68f, 0.90f, 0.52f),
+            Triple(0.86f, 0.86f, 0.56f),
+        )
+    }
+    val anim = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(Unit) {
+        anim.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 750, easing = LinearOutSlowInEasing),
+        )
+    }
+    val t = anim.value
+    Canvas(modifier) {
+        // 细金边短暂提亮
+        val borderAlpha = kotlin.math.sin(t * kotlin.math.PI).toFloat().coerceIn(0f, 1f) * 0.85f
+        if (borderAlpha > 0.01f) {
+            val inset = 1.dp.toPx()
+            drawRoundRect(
+                color = gold.copy(alpha = borderAlpha),
+                topLeft = Offset(inset, inset),
+                size = androidx.compose.ui.geometry.Size(
+                    size.width - inset * 2,
+                    size.height - inset * 2,
+                ),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(12.dp.toPx()),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()),
             )
         }
-    }
-    val progress by animateFloatAsState(
-        targetValue = 1f,
-        animationSpec = tween(durationMillis = 900, easing = LinearOutSlowInEasing),
-        label = "scratch-burst",
-    )
-    Canvas(modifier) {
-        val originX = size.width * 0.45f
-        val originY = size.height * 0.5f
-        for (p in particles) {
-            val x = originX + p.dx * progress
-            val y = originY + p.dy * progress
-            val alpha = (1f - progress).coerceIn(0f, 1f)
-            val s = p.size.dp.toPx() * (0.6f + 0.4f * (1f - progress))
-            drawCircle(p.color.copy(alpha = alpha * p.color.alpha), radius = s / 2f, center = Offset(x, y))
+        val w = size.width
+        val h = size.height
+        for ((fx, fy, delayFrac) in sparks) {
+            // 更短窗口，跟上 0.75s 总时长
+            val local = ((t - delayFrac * 0.55f) / 0.28f).coerceIn(0f, 1f)
+            if (local <= 0f || local >= 1f) continue
+            val pulse = if (local < 0.4f) local / 0.4f else 1f - (local - 0.4f) / 0.6f
+            val alpha = pulse.coerceIn(0f, 1f)
+            val cx = fx * w
+            val cy = fy * h
+            val r = (5f + 9f * pulse).dp.toPx()
+            val color = if (pulse > 0.7f) goldBright else gold
+            drawSparkle(cx, cy, r, color.copy(alpha = alpha))
+            val ray = r * 1.5f
+            val rayColor = color.copy(alpha = alpha * 0.7f)
+            drawLine(rayColor, Offset(cx - ray, cy), Offset(cx + ray, cy), strokeWidth = 1.5.dp.toPx(), cap = StrokeCap.Round)
+            drawLine(rayColor, Offset(cx, cy - ray), Offset(cx, cy + ray), strokeWidth = 1.5.dp.toPx(), cap = StrokeCap.Round)
         }
     }
 }
