@@ -270,13 +270,7 @@ fun EditorPage(
             colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent,
                 unfocusedContainerColor = Color.Transparent, focusedIndicatorColor = Color.Transparent,
                 unfocusedIndicatorColor = Color.Transparent)) }
-        item { FineDivider() }
-        item {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                SectionTitle("图片 / 动图 / 视频", Modifier.weight(1f))
-                Text("${visuals.size}/9", color = Quiet, fontSize = 13.sp)
-            }
-        }
+        // 媒体：无分区标题、无中间分隔线，直接网格 +「图片/视频」入口
         item {
             EditorMediaGrid(
                 visuals = visuals,
@@ -295,8 +289,43 @@ fun EditorPage(
                 report = report,
             )
         }
+        // 音频在位置上面（用户指定顺序）
         item {
-            // 微信式：仅一行入口，位于图片下方
+            // 与「所在位置」同款：空态一行入口；选中后标题 + ×
+            when (val selected = audio) {
+                null -> Row(
+                    Modifier.fillMaxWidth()
+                        .clickable { audioPicker.launch(arrayOf("audio/*")) }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("♪", color = Quiet, fontSize = 20.sp)
+                    Spacer(Modifier.width(10.dp))
+                    Text("添加音乐", Modifier.weight(1f), color = Quiet, fontSize = 15.sp)
+                    Text("›", color = Quiet, fontSize = 20.sp)
+                }
+                is AudioChoice.Existing -> {
+                    val file = repository.files.resolve(selected.value.relativePath)
+                    EditorAudioSelectedRow(
+                        file = file,
+                        displayName = file.nameWithoutExtension,
+                        onRemove = { audio = null },
+                        onReplace = { audioPicker.launch(arrayOf("audio/*")) },
+                    )
+                }
+                is AudioChoice.New -> EditorAudioSelectedRow(
+                    file = selected.value.pendingFile,
+                    displayName = selected.value.pendingFile.nameWithoutExtension,
+                    onRemove = {
+                        repository.files.discard(selected.value)
+                        audio = null
+                    },
+                    onReplace = { audioPicker.launch(arrayOf("audio/*")) },
+                )
+            }
+        }
+        item {
+            // 微信式：仅一行入口，位于音乐下方
             Row(
                 Modifier.fillMaxWidth()
                     .clickable { showLocationPicker = true }
@@ -322,33 +351,6 @@ fun EditorPage(
             }
         }
         item {
-            SectionTitle("音频")
-            Spacer(Modifier.height(12.dp))
-            when (val selected = audio) {
-                is AudioChoice.Existing -> InlineAudio(
-                    repository.files.resolve(selected.value.relativePath),
-                    onRemove = {
-                        audio = null
-                    },
-                    onReplace = { audioPicker.launch(arrayOf("audio/*")) },
-                )
-                is AudioChoice.New -> InlineAudio(
-                    selected.value.pendingFile,
-                    onRemove = {
-                        repository.files.discard(selected.value)
-                        audio = null
-                    },
-                    onReplace = { audioPicker.launch(arrayOf("audio/*")) },
-                )
-                null -> OutlinePanel(Modifier.fillMaxWidth()) {
-                    TextButton(onClick = { audioPicker.launch(arrayOf("audio/*")) },
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                        Text("＋ 添加一段音频", color = Green)
-                    }
-                }
-            }
-        }
-        item {
             TreasureFeelingSection(
                 feeling = feeling,
                 onFeelingChange = { feeling = it },
@@ -359,8 +361,10 @@ fun EditorPage(
         item {
             Spacer(Modifier.height(6.dp))
             Text("文字或图片 / 动图 / 视频，至少填写一项",
+                modifier = Modifier.fillMaxWidth(),
                 color = if (EntryRules.canSave(body, visuals.size, feelingLocked && feeling.isNotBlank())) Quiet else Green,
-                fontSize = 12.sp)
+                fontSize = 12.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             Spacer(Modifier.height(30.dp))
         }
     }
@@ -620,6 +624,73 @@ private fun WheelPicker(
 }
 
 /**
+ * 已选音频：对齐社交编辑器「标题 + ×」样式；点标题可更换，点 ♪ 播放/暂停。
+ */
+@Composable
+private fun EditorAudioSelectedRow(
+    file: java.io.File,
+    displayName: String,
+    onRemove: () -> Unit,
+    onReplace: () -> Unit,
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var player by remember(file.path) { mutableStateOf<androidx.media3.exoplayer.ExoPlayer?>(null) }
+    var playing by remember(file.path) { mutableStateOf(false) }
+    DisposableEffect(player) {
+        val current = player
+        val listener = if (current != null) object : androidx.media3.common.Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
+        } else null
+        if (listener != null) current?.addListener(listener)
+        onDispose {
+            if (current != null) {
+                if (listener != null) current.removeListener(listener)
+                current.release()
+            }
+        }
+    }
+    DisposableEffect(lifecycleOwner, player) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) { player?.pause(); playing = false }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Surface(
+            onClick = {
+                val current = player ?: androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
+                    setMediaItem(androidx.media3.common.MediaItem.fromUri(android.net.Uri.fromFile(file)))
+                    prepare()
+                }.also { player = it }
+                if (current.isPlaying) { current.pause(); playing = false }
+                else { current.play(); playing = true }
+            },
+            shape = RoundedCornerShape(8.dp),
+            color = PaleGreen,
+            modifier = Modifier.size(40.dp),
+        ) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(if (playing) "❚❚" else "♪", color = Green, fontSize = 14.sp)
+            }
+        }
+        Column(Modifier.weight(1f).clickable(onClick = onReplace)) {
+            Text(displayName, color = Ink, fontSize = 15.sp, maxLines = 1)
+            Text(if (playing) "播放中 · 点按更换" else "音频 · 点按更换", color = Quiet, fontSize = 12.sp)
+        }
+        IconButton(onClick = onRemove, modifier = Modifier.size(36.dp)) {
+            Text("×", color = Quiet, fontSize = 22.sp)
+        }
+    }
+}
+
+/**
  * 朋友圈式编辑媒体网格：已选图在前，「+」添加框固定在末尾（满 9 张不显示）；
  * 长按拖动可调整顺序，角标 × 删除。
  */
@@ -729,7 +800,8 @@ private fun EditorMediaGrid(
                                     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.Center) {
                                         Icon(Icons.Default.Add, null, tint = Color(0xFF999999), modifier = Modifier.size(36.dp))
-                                        Text("${visuals.size}/9", color = Color(0xFF999999), fontSize = 12.sp)
+                                        Text("图片/视频", color = Color(0xFF999999), fontSize = 12.sp)
+                                        Text("${visuals.size}/9", color = Color(0xFFBBBBBB), fontSize = 11.sp)
                                     }
                                 }
                             }

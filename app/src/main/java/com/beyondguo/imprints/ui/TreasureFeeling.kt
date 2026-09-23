@@ -77,20 +77,12 @@ fun TreasureFeelingSection(
     )
 
     Column(Modifier.fillMaxWidth()) {
-        // 标题：宝藏隐喻
+        // 标题：宝藏隐喻（副标题按需求去掉）
         Row(verticalAlignment = Alignment.CenterVertically) {
             TreasureGem(Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text("埋一件给未来的宝藏", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         }
-        Spacer(Modifier.height(6.dp))
-        Text(
-            if (feelingLocked) "加密已开启 · 验证后才能写下此刻心情"
-            else "可选 · 写下的心情保存后盖上绿涂层，浏览时刮开才看见",
-            color = Quiet,
-            fontSize = 12.sp,
-            lineHeight = 18.sp,
-        )
         Spacer(Modifier.height(14.dp))
 
         if (feelingLocked) {
