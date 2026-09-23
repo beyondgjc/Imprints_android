@@ -1,15 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  印迹启动图标前景（白色单色，兼容 monochrome）：
-  圆角「涂层卡片」+ 对角刮痕镂空 + 刮痕末端四角星（与应用内刮开动效一致）。
-  安全区：内容大致在 24–84，适配 adaptive icon 圆形/圆角裁切。
+  印迹启动图标前景（第一版结构 + 金星）：
+  白圆角涂层卡片 + 对角刮痕镂空透绿底 + 刮痕末端金色四角星 + 左上小白星。
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- evenOdd：外轮廓圆角方卡 − 对角刮痕 = 镂空露出绿底 -->
+    <!-- evenOdd：白卡 − 对角刮痕 = 露出绿底 -->
     <path
         android:fillType="evenOdd"
         android:fillColor="#FFFFFF"
@@ -28,16 +27,16 @@
             L70.5,44.5
             L43.5,71.5
             Z" />
-    <!-- 刮痕末端四角星（印记 / 宝藏高光） -->
+    <!-- 刮痕末端金星 -->
     <path
-        android:fillColor="#FFFFFF"
+        android:fillColor="#F2CE7B"
         android:pathData="M74,64
             Q74,74 84,74
             Q74,74 74,84
             Q74,74 64,74
             Q74,74 74,64
             Z" />
-    <!-- 小星点，增加层次 -->
+    <!-- 左上小白星 -->
     <path
         android:fillColor="#FFFFFF"
         android:pathData="M34,34

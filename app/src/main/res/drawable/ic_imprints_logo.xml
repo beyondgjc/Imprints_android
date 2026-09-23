@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 印迹 Logo 独立矢量（预览 / 设计稿用），108 网格与启动图标一致 -->
+<!-- 印迹 Logo 合一版（第一版结构 + 金星） -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
@@ -32,19 +32,9 @@
             L43.5,71.5
             Z" />
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M74,64
-            Q74,74 84,74
-            Q74,74 74,84
-            Q74,74 64,74
-            Q74,74 74,64
-            Z" />
+        android:fillColor="#F2CE7B"
+        android:pathData="M74,64 Q74,74 84,74 Q74,74 74,84 Q74,74 64,74 Q74,74 74,64 Z" />
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M34,34
-            Q34,40 40,40
-            Q34,40 34,46
-            Q34,40 28,40
-            Q34,40 34,34
-            Z" />
+        android:pathData="M34,34 Q34,40 40,40 Q34,40 34,46 Q34,40 28,40 Q34,40 34,34 Z" />
 </vector>

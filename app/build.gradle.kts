@@ -57,9 +57,14 @@ android {
 
     buildTypes {
         release {
+            // R8：收缩 + 优化 + 混淆（开源仓；mapping 与 APK 一并归档）
             optimization {
-                enable = false
+                enable = true
             }
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
             }

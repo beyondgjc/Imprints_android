@@ -36,6 +36,8 @@ cd C:\Users\beyondguo\Documents\Agents\Imprints\Imprints_android
 ### Release 1.0（2026-09-22）
 
 - `versionName=1.0`，`versionCode=1`
+- **R8 已开启**（`optimization.enable = true` + `proguard-android-optimize.txt` + `app/proguard-rules.pro`）：收缩/优化/混淆；开源仓以效率与体积为主
+- `mapping.txt`：`app/build/outputs/mapping/release/mapping.txt`（约 50MB+，**崩溃解混淆必存**，勿当无用文件删）
 - 签名：`keystore/imprints-release.keystore`（**gitignore，勿提交**），配置在根目录 `keystore.properties`（gitignore）
 - 构建：`.\gradlew.bat :app:assembleRelease` → `app/build/outputs/apk/release/app-release.apk`
 - **Release SHA1**（apksigner 实测，用于高德控制台）：`7E:39:92:0D:8E:C5:14:95:4B:70:72:4A:78:48:64:0D:49:9D:E8:BB`
