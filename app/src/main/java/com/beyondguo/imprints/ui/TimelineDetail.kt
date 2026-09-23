@@ -19,19 +19,16 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
@@ -49,7 +46,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
@@ -67,7 +63,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.animation.core.LinearOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -84,7 +79,6 @@ import java.time.LocalDateTime
 import java.time.YearMonth
 import java.time.Instant
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -116,7 +110,7 @@ fun TimelinePage(
     val monthsWithEntries = entries.map { it.eventLocalMinute.take(7) }.toSet()
     val daysWithEntries = entries.map { it.eventLocalMinute.take(10) }.toSet()
 
-    fun scrollToEntry(match: com.beyondguo.imprints.data.EntryEntity?) {
+    fun scrollToEntry(match: EntryEntity?) {
         if (match == null) return
         scope.launch { listState.scrollToItem(indexes[match.id] ?: 0) }
     }
@@ -149,6 +143,15 @@ fun TimelinePage(
         return
     }
 
+    // 下滑超过约一屏后显示「回到顶部」，叠在 FAB（+）上方
+    val showBackToTop by remember {
+        androidx.compose.runtime.derivedStateOf {
+            listState.firstVisibleItemIndex > 2 ||
+                listState.firstVisibleItemScrollOffset > 480
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(Modifier.fillMaxSize(), state = listState) {
         item(key = "header") {
             Column(Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 28.dp, bottom = 8.dp),
@@ -257,6 +260,33 @@ fun TimelinePage(
                 }
             }
         }
+    }
+
+    // 回到顶部：叠在 Scaffold FAB（+）上方，下滑一段后出现
+    if (showBackToTop) {
+        Surface(
+            shape = androidx.compose.foundation.shape.CircleShape,
+            color = Color.White,
+            border = BorderStroke(1.dp, Line),
+            shadowElevation = 4.dp,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 16.dp, bottom = 88.dp)
+                .size(44.dp)
+                .clickable {
+                    scope.launch { listState.animateScrollToItem(0) }
+                },
+        ) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Default.KeyboardArrowUp,
+                    contentDescription = "回到顶部",
+                    tint = Quiet,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+        }
+    }
     }
 }
 
