@@ -151,18 +151,11 @@ fun TimelinePage(
 
     LazyColumn(Modifier.fillMaxSize(), state = listState) {
         item(key = "header") {
-            Column(Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 28.dp, bottom = 22.dp),
-                verticalArrangement = Arrangement.spacedBy(24.dp)) {
+            Column(Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 28.dp, bottom = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("我的印迹", Modifier.weight(1f), color = Ink, fontSize = 34.sp, fontWeight = FontWeight.Bold)
                     IconButton(onClick = onSettings) { Icon(Icons.Default.MoreVert, "设置", tint = Quiet) }
-                }
-                OutlinePanel(Modifier.fillMaxWidth().clickable(onClick = onSearch)) {
-                    Row(Modifier.padding(horizontal = 16.dp, vertical = 17.dp), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Icon(Icons.Default.Search, null, tint = Quiet)
-                        Text("搜索印迹正文", color = Quiet, fontSize = 15.sp)
-                    }
                 }
             }
         }
@@ -183,16 +176,25 @@ fun TimelinePage(
                         Modifier
                             .fillMaxWidth()
                             .background(MaterialTheme.colorScheme.background)
-                            .padding(horizontal = 22.dp, vertical = 10.dp),
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
                             displayMonth(month),
-                            Modifier.weight(1f),
+                            Modifier
+                                .weight(1f)
+                                .padding(start = 6.dp),
                             color = Quiet,
                             fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
                         )
+                        // 吸顶：搜索在日历左侧
+                        IconButton(
+                            onClick = onSearch,
+                            modifier = Modifier.size(40.dp),
+                        ) {
+                            Icon(Icons.Default.Search, "搜索", tint = Quiet, modifier = Modifier.size(20.dp))
+                        }
                         IconButton(
                             onClick = { showTimeTravel = true },
                             modifier = Modifier.size(40.dp),
