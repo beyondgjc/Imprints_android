@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.MaterialTheme
@@ -376,26 +378,87 @@ fun FeelingCard(
     onUnlock: () -> Unit, onBiometric: () -> Unit,
 ) {
     var text by remember(feeling, epoch) { mutableStateOf<String?>(null) }
-    var encrypted by remember(feeling, epoch) { mutableStateOf(false) }
-    var biometricEnabled by remember(feeling, epoch) { mutableStateOf(false) }
+    var needsVerify by remember(feeling, epoch) { mutableStateOf(false) }
+    var loaded by remember(feeling, epoch) { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val shake = remember { androidx.compose.animation.core.Animatable(0f) }
+
     LaunchedEffect(feeling, epoch) {
         val state = repository.security.state()
-        encrypted = state.feelingMode == "ON"
-        biometricEnabled = state.feelingBiometricEnvelope != null
-        text = runCatching { repository.security.decodeFeeling(feeling) }.getOrNull()
+        val enc = state.feelingMode == "ON"
+        val unlocked = repository.security.isFeelingUnlocked()
+        // 加密浏览前先验证；验证前不解密、不把明文放进组合
+        needsVerify = enc && !unlocked
+        text = if (needsVerify) null
+        else runCatching { repository.security.decodeFeeling(feeling) }.getOrNull()
+        loaded = true
     }
-    if (encrypted && text == null) {
-        OutlinePanel(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("感受已加密", color = Ink, fontWeight = FontWeight.SemiBold)
-                Text("解锁后仍需亲手刮开涂层", color = Quiet, fontSize = 12.sp)
-                Row {
-                    TextButton(onClick = onUnlock) { Text("6 位口令") }
-                    if (biometricEnabled) TextButton(onClick = onBiometric) { Text("生物识别") }
+
+    if (!loaded) return
+
+    val hasFeel = runCatching { feeling.payload.isNotBlank() }.getOrDefault(true)
+    if (!hasFeel && !needsVerify && text.isNullOrBlank()) return
+
+    if (needsVerify) {
+        // 涂层 UI 与未加密一致（绿底+斜纹+星，无文案/无按钮）；点按晃两下再弹口令
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(72.dp)
+                .graphicsLayer { translationX = shake.value }
+                .clip(RoundedCornerShape(12.dp))
+                .background(Green)
+                .pointerInput(feeling.entryId, epoch) {
+                    detectDragGestures(
+                        onDragStart = {
+                            scope.launch {
+                                // 左右各晃两下
+                                shake.snapTo(0f)
+                                shake.animateTo(10f, tween(50))
+                                shake.animateTo(-10f, tween(100))
+                                shake.animateTo(8f, tween(100))
+                                shake.animateTo(-8f, tween(100))
+                                shake.animateTo(0f, tween(50))
+                                onUnlock()
+                            }
+                        },
+                        onDrag = { change, _ -> change.consume() },
+                    )
+                },
+        ) {
+            Canvas(Modifier.matchParentSize()) {
+                drawRect(Green)
+                val stripe = Color.White.copy(alpha = 0.14f)
+                var x = -size.height.toFloat()
+                while (x < size.width + size.height) {
+                    drawLine(
+                        stripe,
+                        Offset(x, 0f),
+                        Offset(x + size.height, size.height.toFloat()),
+                        strokeWidth = 3.dp.toPx(),
+                    )
+                    x += 9.dp.toPx()
+                }
+                val stars = listOf(
+                    Triple(0.16f, 0.35f, 0.11f),
+                    Triple(0.44f, 0.70f, 0.08f),
+                    Triple(0.70f, 0.28f, 0.13f),
+                    Triple(0.88f, 0.60f, 0.07f),
+                )
+                for ((fx, fy, fr) in stars) {
+                    drawSparkle(
+                        size.width * fx,
+                        size.height * fy,
+                        minOf(size.width, size.height) * fr,
+                        Color.White.copy(alpha = 0.35f),
+                    )
                 }
             }
         }
-    } else text?.let { ScratchFeeling(it, epoch, feeling.entryId) }
+        return
+    }
+
+    text?.let { ScratchFeeling(it, epoch, feeling.entryId) }
 }
 
 /**

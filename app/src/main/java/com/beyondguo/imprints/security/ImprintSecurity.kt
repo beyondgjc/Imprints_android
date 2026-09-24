@@ -67,8 +67,8 @@ class ImprintSecurity(private val database: ImprintDatabase) {
             converted.forEach { dao.upsertFeeling(it) }
             dao.upsertSecurity(state().copy(feelingMode = "ON", feelingHeaderJson = headerJson(header), feelingPinEnvelope = envelope))
         }
+        // 开启成功后不保持会话：时间线/详情需再次验证才能刮开（PRD：查看前先验证）
         clearFeelingSession()
-        feelingKey = key
     }
 
     suspend fun unlockFeelingPin(pin: String): Boolean {
