@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -196,7 +197,7 @@ fun EditorPage(
         Column(Modifier.padding(20.dp)) {
             Text("请先解锁感受，再编辑这条印迹。")
             Button(onClick = onUnlock) { Text("输入感受口令") }
-            TextButton(onClick = ::requestExit) { Text("返回") }
+            TextButton(onClick = ::requestExit) { Text("取消") }
         }
         if (exitRequested && !LocalImprintsLocked.current) AlertDialog(onDismissRequest = { exitRequested = false },
             title = { Text("有内容尚未保存") },
@@ -239,9 +240,9 @@ fun EditorPage(
     }
 
     Column(Modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
-            IconButton(onClick = ::requestExit, modifier = Modifier.align(Alignment.CenterStart)) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = Ink)
+        Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
+            TextButton(onClick = ::requestExit, modifier = Modifier.align(Alignment.CenterStart)) {
+                Text("取消", color = Ink, fontSize = 16.sp)
             }
             Text(if (id == null) "新建印迹" else "编辑印迹", Modifier.align(Alignment.Center),
                 color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -252,19 +253,8 @@ fun EditorPage(
             }
         }
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(22.dp)) {
-        // 事件时间 → 正文 → 图片/媒体 → 位置 → 音频 → 感受
-        item {
-            OutlinePanel(Modifier.fillMaxWidth()) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                Icon(Icons.Default.DateRange, null, tint = Quiet, modifier = Modifier.size(20.dp))
-                Text("事件时间", Modifier.weight(1f), color = Quiet, fontSize = 14.sp)
-                TextButton(onClick = { showEventTimePicker = true }) { Text(eventTime.take(10), color = Ink, fontSize = 13.sp) }
-                TextButton(onClick = { showEventTimePicker = true }) { Text(eventTime.takeLast(5), color = Ink, fontSize = 13.sp) }
-            }
-            }
-        }
+        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // 正文 → 图片/媒体 → 音频 → 位置 → 事件时间 → 感受
         item { TextField(body, { body = it }, placeholder = { Text("发生了什么值得记住的事？", color = Quiet) },
             modifier = Modifier.fillMaxWidth(), minLines = 5, textStyle = androidx.compose.ui.text.TextStyle(fontSize = 18.sp, lineHeight = 29.sp, color = Ink),
             colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent,
@@ -289,33 +279,28 @@ fun EditorPage(
                 report = report,
             )
         }
-        // 音频在位置上面（用户指定顺序）
         item {
-            // 与「所在位置」同款：空态一行入口；选中后标题 + ×
             when (val selected = audio) {
-                null -> Row(
-                    Modifier.fillMaxWidth()
-                        .clickable { audioPicker.launch(arrayOf("audio/*")) }
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("♪", color = Quiet, fontSize = 20.sp)
-                    Spacer(Modifier.width(10.dp))
-                    Text("添加音乐", Modifier.weight(1f), color = Quiet, fontSize = 15.sp)
-                    Text("›", color = Quiet, fontSize = 20.sp)
-                }
+                null -> EditorMetaRow(
+                    leadingContent = { Text("♪", color = Quiet, fontSize = 18.sp) },
+                    title = "添加音乐",
+                    subtitle = null,
+                    titleColor = Quiet,
+                    onClick = { audioPicker.launch(arrayOf("audio/*")) },
+                    trailing = EditorMetaTrailing.Chevron,
+                )
                 is AudioChoice.Existing -> {
                     val file = repository.files.resolve(selected.value.relativePath)
                     EditorAudioSelectedRow(
                         file = file,
-                        displayName = file.nameWithoutExtension,
+                        displayName = friendlyAudioName(file.nameWithoutExtension),
                         onRemove = { audio = null },
                         onReplace = { audioPicker.launch(arrayOf("audio/*")) },
                     )
                 }
                 is AudioChoice.New -> EditorAudioSelectedRow(
                     file = selected.value.pendingFile,
-                    displayName = selected.value.pendingFile.nameWithoutExtension,
+                    displayName = friendlyAudioName(selected.value.pendingFile.nameWithoutExtension),
                     onRemove = {
                         repository.files.discard(selected.value)
                         audio = null
@@ -325,30 +310,50 @@ fun EditorPage(
             }
         }
         item {
-            // 微信式：仅一行入口，位于音乐下方
-            Row(
-                Modifier.fillMaxWidth()
-                    .clickable { showLocationPicker = true }
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    Icons.Default.LocationOn,
-                    null,
-                    tint = if (selectedPlace != null || placeName.isNotBlank()) Green else Quiet,
-                    modifier = Modifier.size(20.dp),
+            val placeTitle = selectedPlace?.name?.takeIf { it.isNotBlank() }
+                ?: placeName.trim().takeIf { it.isNotBlank() }
+            val placeSelected = placeTitle != null
+            if (placeSelected) {
+                EditorMetaRow(
+                    leadingContent = {
+                        Icon(Icons.Default.LocationOn, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                    },
+                    leadingTint = Green,
+                    title = placeTitle!!,
+                    subtitle = selectedPlace?.address?.takeIf { it.isNotBlank() } ?: "点按更换位置",
+                    titleColor = Green,
+                    onClick = { showLocationPicker = true },
+                    trailing = EditorMetaTrailing.Clear,
+                    onClear = {
+                        selectedPlace = null
+                        placeName = ""
+                    },
                 )
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    selectedPlace?.name?.takeIf { it.isNotBlank() }
-                        ?: placeName.trim().takeIf { it.isNotBlank() }
-                        ?: "所在位置",
-                    Modifier.weight(1f),
-                    color = if (selectedPlace != null || placeName.isNotBlank()) Ink else Quiet,
-                    fontSize = 15.sp,
+            } else {
+                EditorMetaRow(
+                    leadingContent = {
+                        Icon(Icons.Default.LocationOn, null, tint = Quiet, modifier = Modifier.size(20.dp))
+                    },
+                    title = "所在位置",
+                    subtitle = null,
+                    titleColor = Quiet,
+                    onClick = { showLocationPicker = true },
+                    trailing = EditorMetaTrailing.Chevron,
                 )
-                Text("›", color = Quiet, fontSize = 20.sp)
             }
+        }
+        // 事件时间：与音乐/位置同一套 Meta 行，位于位置下方
+        item {
+            EditorMetaRow(
+                leadingContent = {
+                    Icon(Icons.Default.DateRange, null, tint = Quiet, modifier = Modifier.size(20.dp))
+                },
+                title = "事件时间",
+                subtitle = "${eventTime.take(10)} · ${eventTime.takeLast(5)}",
+                titleColor = Ink,
+                onClick = { showEventTimePicker = true },
+                trailing = EditorMetaTrailing.Chevron,
+            )
         }
         item {
             TreasureFeelingSection(
@@ -623,8 +628,66 @@ private fun WheelPicker(
     }
 }
 
+/** 媒体库文件名常为 UUID，展示时换成友好文案 */
+private fun friendlyAudioName(raw: String): String =
+    if (raw.matches(Regex("[0-9a-fA-F-]{36}"))) "音频记录" else raw
+
+private enum class EditorMetaTrailing { Chevron, Clear }
+
 /**
- * 已选音频：对齐社交编辑器「标题 + ×」样式；点标题可更换，点 ♪ 播放/暂停。
+ * 编辑页元信息行（音乐/位置共用）：
+ * 左 40 圆角图标 · 中标题+副标题 · 右 › 或 ×，行高/间距对齐参考社交编辑器。
+ */
+@Composable
+private fun EditorMetaRow(
+    leadingContent: @Composable () -> Unit,
+    title: String,
+    subtitle: String?,
+    titleColor: Color,
+    onClick: () -> Unit,
+    trailing: EditorMetaTrailing,
+    leadingTint: Color? = null,
+    onClear: (() -> Unit)? = null,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = leadingTint ?: Color(0xFFF3F4F6),
+            modifier = Modifier.size(40.dp),
+        ) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                leadingContent()
+            }
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, color = titleColor, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            if (!subtitle.isNullOrBlank()) {
+                Text(subtitle, color = Quiet, fontSize = 13.sp, maxLines = 1)
+            }
+        }
+        when (trailing) {
+            EditorMetaTrailing.Chevron -> Text("›", color = Quiet, fontSize = 20.sp,
+                modifier = Modifier.size(width = 24.dp, height = 40.dp)
+                    .wrapContentSize(Alignment.CenterEnd))
+            EditorMetaTrailing.Clear -> {
+                IconButton(onClick = { onClear?.invoke() }, modifier = Modifier.size(40.dp)) {
+                    Text("×", color = Quiet, fontSize = 22.sp)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 已选音频：与位置同一套行布局。
+ * 左 ♪ 播放/暂停 · 中标题/副标题点按更换 · 右 × 移除。
  */
 @Composable
 private fun EditorAudioSelectedRow(
@@ -651,40 +714,43 @@ private fun EditorAudioSelectedRow(
         }
     }
     DisposableEffect(lifecycleOwner, player) {
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) { player?.pause(); playing = false }
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) { player?.pause(); playing = false }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        Modifier.fillMaxWidth().padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Surface(
             onClick = {
                 val current = player ?: androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
-                    setMediaItem(androidx.media3.common.MediaItem.fromUri(android.net.Uri.fromFile(file)))
+                    setMediaItem(androidx.media3.common.MediaItem.fromUri(Uri.fromFile(file)))
                     prepare()
                 }.also { player = it }
                 if (current.isPlaying) { current.pause(); playing = false }
                 else { current.play(); playing = true }
             },
-            shape = RoundedCornerShape(8.dp),
+            shape = RoundedCornerShape(10.dp),
             color = PaleGreen,
             modifier = Modifier.size(40.dp),
         ) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(if (playing) "❚❚" else "♪", color = Green, fontSize = 14.sp)
+                Text(if (playing) "❚❚" else "♪", color = Green, fontSize = 16.sp)
             }
         }
-        Column(Modifier.weight(1f).clickable(onClick = onReplace)) {
-            Text(displayName, color = Ink, fontSize = 15.sp, maxLines = 1)
-            Text(if (playing) "播放中 · 点按更换" else "音频 · 点按更换", color = Quiet, fontSize = 12.sp)
+        Column(
+            Modifier.weight(1f).clickable(onClick = onReplace),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(displayName, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            Text(if (playing) "播放中 · 点按更换" else "音频 · 点按更换", color = Quiet, fontSize = 13.sp, maxLines = 1)
         }
-        IconButton(onClick = onRemove, modifier = Modifier.size(36.dp)) {
+        IconButton(onClick = onRemove, modifier = Modifier.size(40.dp)) {
             Text("×", color = Quiet, fontSize = 22.sp)
         }
     }
