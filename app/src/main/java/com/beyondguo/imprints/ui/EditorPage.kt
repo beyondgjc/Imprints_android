@@ -90,6 +90,7 @@ private data class EditorSnapshot(
 fun EditorPage(
     repository: ImprintRepository, id: String?, epoch: Int,
     onSaved: (String) -> Unit, onCancel: () -> Unit, onUnlock: () -> Unit,
+    onBiometric: (() -> Unit)? = null,
     report: (Throwable) -> Unit,
 ) {
     val context = LocalContext.current
@@ -115,6 +116,7 @@ fun EditorPage(
     var loaded by remember(id) { mutableStateOf(false) }
     var blocked by remember(id) { mutableStateOf(false) }
     var feelingLocked by remember(id) { mutableStateOf(false) }
+    var feelingBioEnabled by remember(id) { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var extraUris by remember { mutableStateOf<List<Uri>?>(null) }
     var initial by remember(id) { mutableStateOf<EditorSnapshot?>(null) }
@@ -135,8 +137,10 @@ fun EditorPage(
     BackHandler(enabled = !showLocationPicker) { requestExit() }
 
     LaunchedEffect(id, epoch) {
+        val sec = repository.security.state()
+        feelingBioEnabled = sec.feelingBiometricEnvelope != null
         if (id == null) {
-            feelingLocked = repository.security.state().feelingMode == "ON" && !repository.security.isFeelingUnlocked()
+            feelingLocked = sec.feelingMode == "ON" && !repository.security.isFeelingUnlocked()
             if (initial == null) initial = snapshot()
         } else {
             val detail = repository.detail(id)
@@ -154,7 +158,7 @@ fun EditorPage(
             val wasBlocked = blocked
             if (!loaded || blocked) feeling = decoded.getOrNull().orEmpty()
             blocked = decoded.isFailure
-            feelingLocked = repository.security.state().feelingMode == "ON" && !repository.security.isFeelingUnlocked()
+            feelingLocked = sec.feelingMode == "ON" && !repository.security.isFeelingUnlocked()
             if (!loaded || wasBlocked && decoded.isSuccess) initial = snapshot()
             loaded = true
         }
@@ -370,6 +374,8 @@ fun EditorPage(
                 onFeelingChange = { feeling = it },
                 feelingLocked = feelingLocked,
                 onUnlock = onUnlock,
+                onBiometric = onBiometric,
+                feelingBiometricEnabled = feelingBioEnabled,
             )
         }
         item {

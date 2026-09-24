@@ -64,6 +64,8 @@ fun TreasureFeelingSection(
     onFeelingChange: (String) -> Unit,
     feelingLocked: Boolean,
     onUnlock: () -> Unit,
+    onBiometric: (() -> Unit)? = null,
+    feelingBiometricEnabled: Boolean = false,
 ) {
     var expanded by remember { mutableStateOf(feeling.isNotBlank()) }
     var lockedExpanded by remember { mutableStateOf(false) }
@@ -94,7 +96,10 @@ fun TreasureFeelingSection(
         )
         if (lockedExpanded) {
             Spacer(Modifier.height(6.dp))
-            TreasureLockedCard(onUnlock = onUnlock)
+            TreasureLockedCard(
+                onUnlock = onUnlock,
+                onBiometric = if (feelingBiometricEnabled) onBiometric else null,
+            )
         }
         return
     }
@@ -217,7 +222,7 @@ private fun SealedPreviewChip() {
 }
 
 @Composable
-private fun TreasureLockedCard(onUnlock: () -> Unit) {
+private fun TreasureLockedCard(onUnlock: () -> Unit, onBiometric: (() -> Unit)? = null) {
     Box(
         Modifier
             .fillMaxWidth()
@@ -258,8 +263,20 @@ private fun TreasureLockedCard(onUnlock: () -> Unit) {
                     Text("感受加密开启中，先验证才能继续埋", color = Quiet, fontSize = 12.sp)
                 }
             }
-            TextButton(onClick = onUnlock) {
-                Text("解锁后填写感受", color = Green, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (onBiometric != null) {
+                    TextButton(onClick = onBiometric) {
+                        Text("使用指纹", color = Green, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+                TextButton(onClick = onUnlock) {
+                    Text(
+                        if (onBiometric != null) "改用口令" else "解锁后填写感受",
+                        color = Green,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
             }
         }
     }

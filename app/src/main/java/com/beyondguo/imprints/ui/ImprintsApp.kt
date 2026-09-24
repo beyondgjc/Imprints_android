@@ -39,6 +39,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -49,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -62,6 +64,7 @@ import com.beyondguo.imprints.backup.BackupService
 import com.beyondguo.imprints.data.ImprintDatabase
 import com.beyondguo.imprints.data.EntryEntity
 import com.beyondguo.imprints.data.ImprintRepository
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.net.Uri
 
@@ -131,10 +134,20 @@ fun ImprintsApp(
         }
     }
 
-    fun tryBiometric(target: String, after: () -> Unit = {}, fallback: () -> Unit = {
-        scope.launch { snackbar.showSnackbar("请使用对应的 6 位口令") }
-    }) {
-        requestBiometric(target, { securityEpoch++; after() }, fallback)
+    fun tryBiometric(
+        target: String,
+        after: () -> Unit = {},
+        fallback: () -> Unit = {
+            scope.launch { snackbar.showSnackbar("请使用对应的 6 位口令") }
+        },
+        onSuccess: () -> Unit = {},
+        onUnavailable: (() -> Unit)? = null,
+    ) {
+        requestBiometric(
+            target,
+            { securityEpoch++; after(); onSuccess() },
+            onUnavailable ?: fallback,
+        )
     }
 
     LaunchedEffect(pendingExportUri, pendingImportPreview, locked, securityEpoch, initialized) {
@@ -227,7 +240,12 @@ fun ImprintsApp(
                     onOpen = { page = Page.Detail(it) },
                     onSearch = { page = Page.Search }, onSettings = { page = Page.Settings },
                     onUnlock = { askPin("feeling-unlock", "解锁感受") },
-                    onBiometric = { tryBiometric("feeling-unlock") },
+                    onBiometric = {
+                        tryBiometric(
+                            "feeling-unlock",
+                            onUnavailable = { askPin("feeling-unlock", "解锁感受") },
+                        )
+                    },
                     scrollToId = pendingScrollToId,
                     onScrollConsumed = { pendingScrollToId = null },
                     onOpenPlace = { place -> page = Page.LocationDetail(place) })
@@ -240,8 +258,19 @@ fun ImprintsApp(
                     onFeelingBio = {
                         if (feelingBioEnabled) scope.launch {
                             runCatching { security.disableFeelingBiometric() }.onSuccess { securityEpoch++ }.onFailure(::report)
-                        } else if (security.isFeelingUnlocked()) tryBiometric("feeling-enable")
-                        else askPin("feeling-bio", "先验证感受口令")
+                        } else if (security.isFeelingUnlocked()) {
+                            tryBiometric(
+                                "feeling-enable",
+                                onSuccess = { scope.launch { snackbar.showSnackbar("感受生物识别已开启") } },
+                                onUnavailable = {
+                                    scope.launch {
+                                        snackbar.showSnackbar("指纹验证未弹出或未完成，感受生物识别未开启")
+                                    }
+                                },
+                            )
+                        } else {
+                            askPin("feeling-bio", "先验证感受口令，再开启生物识别")
+                        }
                     },
                     onFeelingPinChange = {
                         if (feelingBioEnabled) tryBiometric("feeling-unlock",
@@ -256,7 +285,13 @@ fun ImprintsApp(
                     onAppBio = {
                         if (appBioEnabled) scope.launch {
                             runCatching { security.setAppLockBiometricEnabled(false) }.onSuccess { securityEpoch++ }.onFailure(::report)
-                        } else tryBiometric("app-enable")
+                        } else if (appLockEnabled) {
+                            // 开启前先验证应用锁口令（与 PRD 一致）
+                            askPin("app-bio", "验证应用锁口令后开启生物识别")
+                        } else {
+                            tryBiometric("app-enable",
+                                onSuccess = { scope.launch { snackbar.showSnackbar("应用锁生物识别已开启") } })
+                        }
                     },
                     onAppPinChange = {
                         if (appBioEnabled) tryBiometric("app-change",
@@ -298,7 +333,12 @@ fun ImprintsApp(
                         }
                     },
                     onUnlock = { askPin("feeling-unlock", "解锁感受") },
-                    onBiometric = { tryBiometric("feeling-unlock") },
+                    onBiometric = {
+                        tryBiometric(
+                            "feeling-unlock",
+                            onUnavailable = { askPin("feeling-unlock", "解锁感受") },
+                        )
+                    },
                     onOpenPlace = { place -> page = Page.LocationDetail(place) })
                 is Page.RecycleDetail -> DetailPage(repository, current.id, revealEpoch + securityEpoch,
                     onEdit = {},
@@ -311,7 +351,12 @@ fun ImprintsApp(
                         }
                     },
                     onUnlock = { askPin("feeling-unlock", "解锁感受") },
-                    onBiometric = { tryBiometric("feeling-unlock") },
+                    onBiometric = {
+                        tryBiometric(
+                            "feeling-unlock",
+                            onUnavailable = { askPin("feeling-unlock", "解锁感受") },
+                        )
+                    },
                     onOpenPlace = { place -> page = Page.LocationDetail(place) },
                     recycleActions = {
                         scope.launch {
@@ -337,6 +382,12 @@ fun ImprintsApp(
                     onSaved = { page = Page.Detail(it) },
                     onCancel = { page = Page.Timeline },
                     onUnlock = { askPin("feeling-unlock", "解锁感受") },
+                    onBiometric = {
+                        tryBiometric(
+                            "feeling-unlock",
+                            onUnavailable = { askPin("feeling-unlock", "解锁感受") },
+                        )
+                    },
                     report = ::report)
             }
         }
@@ -357,7 +408,23 @@ fun ImprintsApp(
                         "feeling-unlock" -> check(security.unlockFeelingPin(pin)) { "感受口令错误或暂时被限制" }
                         "feeling-export", "feeling-import" -> check(security.unlockFeelingPin(pin)) { "感受口令错误或暂时被限制" }
                         "feeling-disable" -> { check(security.unlockFeelingPin(pin)) { "感受口令错误或暂时被限制" }; repository.exclusive { security.disableFeeling() } }
-                        "feeling-bio" -> { check(security.unlockFeelingPin(pin)) { "感受口令错误或暂时被限制" }; tryBiometric("feeling-enable") }
+                        "feeling-bio" -> {
+                            check(security.unlockFeelingPin(pin)) { "感受口令错误或暂时被限制" }
+                            tryBiometric(
+                                "feeling-enable",
+                                onSuccess = { scope.launch { snackbar.showSnackbar("感受生物识别已开启") } },
+                                onUnavailable = {
+                                    scope.launch {
+                                        snackbar.showSnackbar("指纹验证未弹出或未完成，感受生物识别未开启")
+                                    }
+                                },
+                            )
+                        }
+                        "app-bio" -> {
+                            check(security.verifyAppLock(pin)) { "应用锁口令错误" }
+                            tryBiometric("app-enable",
+                                onSuccess = { scope.launch { snackbar.showSnackbar("应用锁生物识别已开启") } })
+                        }
                         "feeling-change-old" -> { check(security.unlockFeelingPin(pin)) { "感受口令错误或暂时被限制" }; askPin("feeling-change-new", "设置新的感受 6 位口令") }
                         "feeling-change-new" -> security.resetFeelingPin(pin)
                         "app-enable" -> { security.setAppLock(pin); refreshLockState() }
@@ -421,11 +488,59 @@ fun ImprintsApp(
         dismissButton = { TextButton(onClick = { confirmDisableFeeling = false }) { Text("取消") } },
     )
     if (locked) {
+        var lockError by remember(securityEpoch) { mutableStateOf<String?>(null) }
+        var unlocking by remember(securityEpoch) { mutableStateOf(false) }
+
+        // 冷启动/回锁且已开应用锁指纹时自动拉起（对齐 Penly LockScreen）：
+        // 必须等本应用窗口真正拿到焦点——启动动画期间 Activity 已 RESUMED 但桌面仍在最上层，
+        // 无焦点时弹认证会被系统当后台认证立刻取消。每次进锁屏只自动拉一次。
+        var autoPrompted by remember(securityEpoch) { mutableStateOf(false) }
+        val view = LocalView.current
+        var windowFocused by remember { mutableStateOf(view.hasWindowFocus()) }
+        DisposableEffect(view) {
+            val listener = android.view.ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
+                windowFocused = hasFocus
+            }
+            view.viewTreeObserver.addOnWindowFocusChangeListener(listener)
+            onDispose { view.viewTreeObserver.removeOnWindowFocusChangeListener(listener) }
+        }
+        LaunchedEffect(locked, windowFocused, appBioEnabled, securityEpoch) {
+            if (!locked || autoPrompted || !appBioEnabled || !windowFocused) return@LaunchedEffect
+            autoPrompted = true
+            delay(200) // 等窗口完成首帧渲染
+            lockError = null
+            tryBiometric(
+                "app-unlock",
+                onUnavailable = { /* 取消/不可用：留在锁屏，用户可改输口令 */ },
+            )
+        }
+
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).clickable { }) {
             LockPage(
                 biometricAvailable = appBioEnabled,
-                onPin = { pin -> scope.launch { if (!unlockApp(pin)) snackbar.showSnackbar("口令错误或暂时被限制，请重试") } },
-                onBiometric = { tryBiometric("app-unlock") },
+                error = lockError,
+                unlocking = unlocking,
+                onPin = { pin ->
+                    scope.launch {
+                        if (unlocking) return@launch
+                        unlocking = true
+                        lockError = null
+                        try {
+                            if (!unlockApp(pin)) lockError = "口令错误或暂时被限制，请重试"
+                        } catch (error: Exception) {
+                            lockError = error.message ?: "解锁失败，请重试"
+                        } finally {
+                            unlocking = false
+                        }
+                    }
+                },
+                onBiometric = {
+                    lockError = null
+                    tryBiometric(
+                        "app-unlock",
+                        onUnavailable = { /* 保持锁屏 */ },
+                    )
+                },
             )
         }
     }
@@ -433,7 +548,13 @@ fun ImprintsApp(
 }
 
 @Composable
-private fun LockPage(biometricAvailable: Boolean, onPin: (String) -> Unit, onBiometric: () -> Unit) {
+private fun LockPage(
+    biometricAvailable: Boolean,
+    error: String?,
+    unlocking: Boolean,
+    onPin: (String) -> Unit,
+    onBiometric: () -> Unit,
+) {
     var pin by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.Center,
         horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
@@ -442,17 +563,28 @@ private fun LockPage(biometricAvailable: Boolean, onPin: (String) -> Unit, onBio
         Text("欢迎回来", color = Ink, fontSize = 30.sp, fontWeight = FontWeight.Bold)
         Text("输入 6 位口令，继续你的记录", color = Quiet, fontSize = 14.sp)
         Spacer(Modifier.height(32.dp))
-        PinField(pin) { pin = it }
+        PinField(pin) { pin = it; }
+        if (error != null) {
+            Spacer(Modifier.height(10.dp))
+            Text(error, color = Color(0xFFD92D20), fontSize = 13.sp)
+        }
         Spacer(Modifier.height(18.dp))
-        Button(onClick = { onPin(pin); pin = "" }, enabled = pin.length == 6,
-            modifier = Modifier.fillMaxWidth()) { Text("解锁") }
+        Button(
+            onClick = { val entered = pin; pin = ""; onPin(entered) },
+            enabled = pin.length == 6 && !unlocking,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text(if (unlocking) "验证中…" else "解锁") }
         if (biometricAvailable) TextButton(onClick = onBiometric) { Text("使用生物识别") }
     }
 }
 
 @Composable
 private fun PinField(value: String, onChange: (String) -> Unit) {
-    OutlinedTextField(value = value, onValueChange = { if (it.length <= 6 && it.all(Char::isDigit)) onChange(it) },
+    // 仅允许 ASCII 数字：与 PinPolicy 的 [0-9]{6} 对齐，避免全角数字通过输入却过不了校验
+    OutlinedTextField(value = value, onValueChange = { input ->
+        val filtered = input.filter { it in '0'..'9' }.take(6)
+        if (filtered != value) onChange(filtered)
+    },
         label = { Text("6 位数字口令") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
         singleLine = true, modifier = Modifier.fillMaxWidth(),
         shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),

@@ -380,6 +380,7 @@ fun FeelingCard(
     var text by remember(feeling, epoch) { mutableStateOf<String?>(null) }
     var needsVerify by remember(feeling, epoch) { mutableStateOf(false) }
     var loaded by remember(feeling, epoch) { mutableStateOf(false) }
+    var bioEnabled by remember(feeling, epoch) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val shake = remember { androidx.compose.animation.core.Animatable(0f) }
 
@@ -387,6 +388,7 @@ fun FeelingCard(
         val state = repository.security.state()
         val enc = state.feelingMode == "ON"
         val unlocked = repository.security.isFeelingUnlocked()
+        bioEnabled = state.feelingBiometricEnvelope != null
         // 加密浏览前先验证；验证前不解密、不把明文放进组合
         needsVerify = enc && !unlocked
         text = if (needsVerify) null
@@ -400,7 +402,19 @@ fun FeelingCard(
     if (!hasFeel && !needsVerify && text.isNullOrBlank()) return
 
     if (needsVerify) {
-        // 涂层 UI 与未加密一致（绿底+斜纹+星，无文案/无按钮）；点按晃两下再弹口令
+        // 已开指纹先弹指纹，否则口令；点按/滑动都触发
+        fun beginVerify() {
+            scope.launch {
+                shake.snapTo(0f)
+                shake.animateTo(10f, tween(50))
+                shake.animateTo(-10f, tween(100))
+                shake.animateTo(8f, tween(100))
+                shake.animateTo(-8f, tween(100))
+                shake.animateTo(0f, tween(50))
+                if (bioEnabled) onBiometric() else onUnlock()
+            }
+        }
+        // 涂层 UI 与未加密一致（绿底+斜纹+星，无文案/无按钮）
         Box(
             Modifier
                 .fillMaxWidth()
@@ -408,20 +422,12 @@ fun FeelingCard(
                 .graphicsLayer { translationX = shake.value }
                 .clip(RoundedCornerShape(12.dp))
                 .background(Green)
-                .pointerInput(feeling.entryId, epoch) {
+                .pointerInput(feeling.entryId, epoch, bioEnabled) {
+                    detectTapGestures(onTap = { beginVerify() })
+                }
+                .pointerInput(feeling.entryId, epoch, bioEnabled) {
                     detectDragGestures(
-                        onDragStart = {
-                            scope.launch {
-                                // 左右各晃两下
-                                shake.snapTo(0f)
-                                shake.animateTo(10f, tween(50))
-                                shake.animateTo(-10f, tween(100))
-                                shake.animateTo(8f, tween(100))
-                                shake.animateTo(-8f, tween(100))
-                                shake.animateTo(0f, tween(50))
-                                onUnlock()
-                            }
-                        },
+                        onDragStart = { beginVerify() },
                         onDrag = { change, _ -> change.consume() },
                     )
                 },

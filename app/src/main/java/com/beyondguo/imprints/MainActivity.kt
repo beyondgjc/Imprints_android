@@ -31,6 +31,8 @@ class MainActivity : FragmentActivity() {
     private var initialized = androidx.compose.runtime.mutableStateOf(false)
     private var lockEnabled = false
     private var revealEpoch = androidx.compose.runtime.mutableIntStateOf(0)
+    /** 生物识别弹窗期间不清感受会话，否则注册/解锁成功回调时 FEK 已被清掉 */
+    private var biometricPromptActive = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -96,23 +98,48 @@ class MainActivity : FragmentActivity() {
     override fun onStop() {
         super.onStop()
         com.beyondguo.imprints.privacy.PrivacyPreferences.apply(this)
-        security.clearFeelingSession()
-        revealEpoch.intValue++
+        // 指纹系统弹窗可能触发 onStop；此刻清会话会导致「刚输完口令开指纹却注册失败」
+        if (!biometricPromptActive) {
+            security.clearFeelingSession()
+            revealEpoch.intValue++
+        }
         if (lockEnabled) appLocked.value = true
     }
 
     private fun promptBiometric(target: String, onSuccess: () -> Unit, onUnavailable: () -> Unit) {
-        if (BiometricManager.from(this).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) != BiometricManager.BIOMETRIC_SUCCESS) {
+        val manager = BiometricManager.from(this)
+        // MIUI/API29 上 BIOMETRIC_STRONG 常返回 STATUS_UNKNOWN(-1)，但指纹仍可用；
+        // 只有明确「无硬件/未录入/硬件不可用」才拦截，未知状态照样尝试弹窗。
+        val can = manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+        val hardFail = can in setOf(
+            BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE,
+            BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE,
+            BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED,
+            BiometricManager.BIOMETRIC_ERROR_UNSUPPORTED,
+        )
+        android.util.Log.i("ImprintsBio", "promptBiometric target=$target canAuthenticate=$can hardFail=$hardFail")
+        if (hardFail) {
+            android.util.Log.e("ImprintsBio", "biometric unavailable can=$can")
             onUnavailable()
             return
         }
         lifecycleScope.launch {
-            val cipher: Cipher? = when (target) {
-                "feeling-unlock" -> runCatching { security.biometricUnlockCipher() }.getOrNull()
-                "feeling-enable" -> runCatching { security.biometricEnrollmentCipher() }.getOrNull()
-                else -> null
+            var cipher: Cipher? = null
+            var cipherError: Throwable? = null
+            when (target) {
+                "feeling-unlock" -> {
+                    val r = runCatching { security.biometricUnlockCipher() }
+                    cipher = r.getOrNull(); cipherError = r.exceptionOrNull()
+                }
+                "feeling-enable" -> {
+                    val r = runCatching { security.biometricEnrollmentCipher() }
+                    cipher = r.getOrNull(); cipherError = r.exceptionOrNull()
+                }
+                else -> cipher = null
             }
+            android.util.Log.i("ImprintsBio", "target=$target cipher=${cipher != null} cipherError=$cipherError")
             if (target.startsWith("feeling") && cipher == null) {
+                android.util.Log.e("ImprintsBio", "feeling cipher unavailable", cipherError)
                 onUnavailable()
                 return@launch
             }
@@ -120,30 +147,74 @@ class MainActivity : FragmentActivity() {
                 object : BiometricPrompt.AuthenticationCallback() {
                     override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                         lifecycleScope.launch {
-                            val worked = runCatching {
-                                when (target) {
-                                    "feeling-unlock" -> security.finishBiometricUnlock(result.cryptoObject?.cipher ?: error("缺少认证 Cipher"))
-                                    "feeling-enable" -> security.finishBiometricEnrollment(result.cryptoObject?.cipher ?: error("缺少认证 Cipher"))
-                                    "app-unlock" -> appLocked.value = false
-                                    "app-enable" -> security.setAppLockBiometricEnabled(true)
-                                    "app-change" -> Unit
+                            try {
+                                val error = runCatching {
+                                    when (target) {
+                                        "feeling-unlock" -> security.finishBiometricUnlock(result.cryptoObject?.cipher ?: error("缺少认证 Cipher"))
+                                        "feeling-enable" -> {
+                                            if (!security.isFeelingUnlocked()) error("感受会话已失效，请重新输入口令")
+                                            security.finishBiometricEnrollment(result.cryptoObject?.cipher ?: error("缺少认证 Cipher"))
+                                        }
+                                        "app-unlock" -> appLocked.value = false
+                                        "app-enable" -> security.setAppLockBiometricEnabled(true)
+                                        "app-change" -> Unit
+                                    }
+                                }.exceptionOrNull()
+                                if (error == null) onSuccess()
+                                else {
+                                    runCatching {
+                                        android.widget.Toast.makeText(
+                                            this@MainActivity,
+                                            error.message ?: "生物识别未完成，请重试",
+                                            android.widget.Toast.LENGTH_SHORT,
+                                        ).show()
+                                    }
+                                    onUnavailable()
                                 }
-                            }.isSuccess
-                            if (worked) onSuccess() else onUnavailable()
+                            } finally {
+                                biometricPromptActive = false
+                            }
                         }
                     }
 
                     override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                        android.util.Log.e("ImprintsBio", "authError code=$errorCode msg=$errString target=$target")
+                        biometricPromptActive = false
+                        if (errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
+                            errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON
+                        ) {
+                            runCatching {
+                                android.widget.Toast.makeText(
+                                    this@MainActivity,
+                                    errString.toString(),
+                                    android.widget.Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        }
                         onUnavailable()
                     }
                 })
+            val promptTitle = when (target) {
+                "feeling-unlock" -> "验证感受"
+                "feeling-enable" -> "开启感受生物识别"
+                "app-enable" -> "开启应用锁生物识别"
+                else -> "解锁印迹"
+            }
             val info = BiometricPrompt.PromptInfo.Builder()
-                .setTitle(if (target.startsWith("feeling")) "验证感受" else "解锁印迹")
+                .setTitle(promptTitle)
                 .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
                 .setNegativeButtonText("使用 6 位口令")
                 .build()
-            if (cipher == null) prompt.authenticate(info)
-            else prompt.authenticate(info, BiometricPrompt.CryptoObject(cipher))
+            android.util.Log.i("ImprintsBio", "authenticate target=$target withCrypto=${cipher != null}")
+            biometricPromptActive = true
+            try {
+                if (cipher == null) prompt.authenticate(info)
+                else prompt.authenticate(info, BiometricPrompt.CryptoObject(cipher))
+            } catch (error: Exception) {
+                biometricPromptActive = false
+                android.util.Log.e("ImprintsBio", "authenticate threw", error)
+                onUnavailable()
+            }
         }
     }
 }
