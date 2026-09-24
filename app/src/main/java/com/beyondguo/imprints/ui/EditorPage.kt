@@ -21,9 +21,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.ime
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
@@ -244,8 +241,7 @@ fun EditorPage(
         return
     }
 
-    // adjustResize（系统缩窗）+ imePadding（Compose 再按 IME 收，edge-to-edge 下必要）
-    Column(Modifier.fillMaxSize().imePadding()) {
+    Column(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
             TextButton(onClick = ::requestExit, modifier = Modifier.align(Alignment.CenterStart)) {
                 Text("取消", color = Ink, fontSize = 16.sp)
@@ -258,19 +254,14 @@ fun EditorPage(
                 Text(if (saving) "保存中" else "保存")
             }
         }
-    val density = LocalDensity.current
-    val imeBottomPx = WindowInsets.ime.getBottom(density)
-    val listBottomPad = with(density) {
-        val extra = if (imeBottomPx > 0) (imeBottomPx * 0.15f).toDp() else 0.dp
-        24.dp + extra
-    }
     LazyColumn(
         Modifier
             .weight(1f)
             .fillMaxWidth()
+            .imePadding()
             .padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = listBottomPad),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp),
     ) {
         // 正文 → 图片/媒体 → 音频 → 位置 → 事件时间 → 感受
         item { TextField(body, { body = it }, placeholder = { Text("发生了什么值得记住的事？", color = Quiet) },

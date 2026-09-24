@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -29,7 +31,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,12 +41,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
-import kotlinx.coroutines.launch
+import kotlin.time.Duration.Companion.milliseconds
 
 private val Gold = Color(0xFFF2CE7B)
 private val DeepGreen = Color(0xFF06A854)
@@ -68,12 +70,13 @@ fun TreasureFeelingSection(
     var focused by remember { mutableStateOf(false) }
     val hasText = feeling.isNotBlank()
     val bringIntoView = remember { BringIntoViewRequester() }
-    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val imeBottomPx = WindowInsets.ime.getBottom(density)
 
-    // 文本变长或获得焦点时，把整块输入卡滚到键盘上方（跟随高度，不是固定偏移）
-    LaunchedEffect(focused, feeling, expanded) {
-        if (focused && expanded) {
-            kotlinx.coroutines.delay(30)
+    // 等 IME inset 稳定后再滚动；只在获得焦点时滚动会早于键盘完成展开。
+    LaunchedEffect(focused, expanded, imeBottomPx, feeling.length) {
+        if (focused && expanded && imeBottomPx > 0) {
+            kotlinx.coroutines.delay(32.milliseconds)
             runCatching { bringIntoView.bringIntoView() }
         }
     }
@@ -128,8 +131,7 @@ fun TreasureFeelingSection(
                     1.dp,
                     if (focused) Green else Color(0xFFE5DCCB),
                     RoundedCornerShape(14.dp),
-                )
-                .onFocusChanged { /* outer box 不接收焦点 */ },
+                ),
         ) {
             Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                 OutlinedTextField(
@@ -145,11 +147,7 @@ fun TreasureFeelingSection(
                     modifier = Modifier
                         .fillMaxWidth()
                         .onFocusChanged {
-                            val now = it.isFocused
-                            if (now && !focused) {
-                                scope.launch { bringIntoView.bringIntoView() }
-                            }
-                            focused = now
+                            focused = it.isFocused
                         },
                     minLines = 2,
                     maxLines = 8,
