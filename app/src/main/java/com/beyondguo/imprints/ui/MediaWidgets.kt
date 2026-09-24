@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -214,9 +215,11 @@ fun MomentsMediaGrid(cells: List<Pair<File, String>>, modifier: Modifier = Modif
     val gap = 6.dp
     if (cells.size == 1) {
         val (file, kind) = cells.first()
+        // 单图：靠左，不居中
         MediaThumbnail(
             file, kind,
             modifier
+                .wrapContentWidth(Alignment.Start)
                 .widthIn(max = 280.dp)
                 .heightIn(max = 280.dp)
                 .aspectRatio(1f, matchHeightConstraintsFirst = true),
@@ -225,8 +228,9 @@ fun MomentsMediaGrid(cells: List<Pair<File, String>>, modifier: Modifier = Modif
         )
         return
     }
-    val columns = when {
-        cells.size == 4 -> 2
+    // 1 已处理；2 与 4 用 2 列（单元格与 4 宫格同大）；其余 3 列
+    val columns = when (cells.size) {
+        2, 4 -> 2
         else -> 3
     }
     // 固定高度约束，避免 LazyColumn 子项测量溢出盖住下方内容
