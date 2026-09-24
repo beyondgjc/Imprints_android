@@ -35,6 +35,17 @@ cd C:\Users\beyondguo\Documents\Agents\Imprints\Imprints_android
 
 高德 Android Key 在本机 `local.properties`（勿提交）。Release 签名与 SHA1 见下。
 
+### Release 1.2（2026-09-24）
+
+- `versionName=1.2`，`versionCode=3`
+- 感受区 Meta 行折叠/旋转箭头；事件时间 Meta 行；键盘 ime 动态适配
+- 防截屏+多任务单开关；时间线单图靠左、2 图 2 列
+- **R8 已开启**；`mapping.txt`：`app/build/outputs/mapping/release/`（**必备份**）
+- 构建：`.\gradlew.bat :app:assembleRelease` → `app/build/outputs/apk/release/app-release.apk`
+- **Release SHA1**（不变）：`7E:39:92:0D:8E:C5:14:95:4B:70:72:4A:78:48:64:0D:49:9D:E8:BB`
+- 包名：`com.beyondguo.imprints`
+- GitHub：`https://github.com/beyondgjc/Imprints_android/releases/tag/v1.2`
+
 ### Release 1.1（2026-09-23）
 
 - `versionName=1.1`，`versionCode=2`
