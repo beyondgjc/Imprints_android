@@ -19,7 +19,11 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
@@ -56,6 +60,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -239,7 +244,8 @@ fun EditorPage(
         return
     }
 
-    Column(Modifier.fillMaxSize()) {
+    // adjustResize（系统缩窗）+ imePadding（Compose 再按 IME 收，edge-to-edge 下必要）
+    Column(Modifier.fillMaxSize().imePadding()) {
         Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
             TextButton(onClick = ::requestExit, modifier = Modifier.align(Alignment.CenterStart)) {
                 Text("取消", color = Ink, fontSize = 16.sp)
@@ -252,8 +258,20 @@ fun EditorPage(
                 Text(if (saving) "保存中" else "保存")
             }
         }
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val density = LocalDensity.current
+    val imeBottomPx = WindowInsets.ime.getBottom(density)
+    val listBottomPad = with(density) {
+        val extra = if (imeBottomPx > 0) (imeBottomPx * 0.15f).toDp() else 0.dp
+        24.dp + extra
+    }
+    LazyColumn(
+        Modifier
+            .weight(1f)
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = listBottomPad),
+    ) {
         // 正文 → 图片/媒体 → 音频 → 位置 → 事件时间 → 感受
         item { TextField(body, { body = it }, placeholder = { Text("发生了什么值得记住的事？", color = Quiet) },
             modifier = Modifier.fillMaxWidth(), minLines = 5, textStyle = androidx.compose.ui.text.TextStyle(fontSize = 18.sp, lineHeight = 29.sp, color = Ink),
@@ -632,14 +650,15 @@ private fun WheelPicker(
 private fun friendlyAudioName(raw: String): String =
     if (raw.matches(Regex("[0-9a-fA-F-]{36}"))) "音频记录" else raw
 
-private enum class EditorMetaTrailing { Chevron, Clear }
+internal enum class EditorMetaTrailing { Chevron, Clear, Expand }
 
 /**
- * 编辑页元信息行（音乐/位置共用）：
- * 左 40 圆角图标 · 中标题+副标题 · 右 › 或 ×，行高/间距对齐参考社交编辑器。
+ * 编辑页元信息行（音乐/位置/感受共用）：
+ * 左 40 圆角图标 · 中标题+副标题 · 右 › / 展开箭头 / ×。
+ * [EditorMetaTrailing.Expand]：收起为 →，展开顺时针转 90° 成 ↓。
  */
 @Composable
-private fun EditorMetaRow(
+internal fun EditorMetaRow(
     leadingContent: @Composable () -> Unit,
     title: String,
     subtitle: String?,
@@ -648,6 +667,7 @@ private fun EditorMetaRow(
     trailing: EditorMetaTrailing,
     leadingTint: Color? = null,
     onClear: (() -> Unit)? = null,
+    expanded: Boolean = false,
 ) {
     Row(
         Modifier
@@ -679,6 +699,28 @@ private fun EditorMetaRow(
             EditorMetaTrailing.Clear -> {
                 IconButton(onClick = { onClear?.invoke() }, modifier = Modifier.size(40.dp)) {
                     Text("×", color = Quiet, fontSize = 22.sp)
+                }
+            }
+            EditorMetaTrailing.Expand -> {
+                val rotation by androidx.compose.animation.core.animateFloatAsState(
+                    targetValue = if (expanded) 90f else 0f,
+                    animationSpec = androidx.compose.animation.core.tween(200),
+                    label = "meta-chevron",
+                )
+                Box(
+                    Modifier
+                        .size(40.dp)
+                        .wrapContentSize(Alignment.CenterEnd),
+                    contentAlignment = Alignment.CenterEnd,
+                ) {
+                    Text(
+                        "›",
+                        color = Quiet,
+                        fontSize = 22.sp,
+                        modifier = Modifier
+                            .rotate(rotation)
+                            .padding(end = 4.dp),
+                    )
                 }
             }
         }

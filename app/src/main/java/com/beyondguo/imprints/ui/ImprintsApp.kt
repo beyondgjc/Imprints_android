@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -215,7 +216,7 @@ fun ImprintsApp(
             onClick = { page = Page.Editor(null) }, shape = CircleShape, containerColor = Green,
             contentColor = Color.White) { Icon(Icons.Default.Add, "新建印迹") } },
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
+        Box(Modifier.fillMaxSize().padding(padding).imePadding()) {
             when (val current = page) {
                 Page.Timeline -> TimelinePage(active, repository, revealEpoch + securityEpoch,
                     onOpen = { page = Page.Detail(it) },

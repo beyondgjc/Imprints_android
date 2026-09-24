@@ -1,6 +1,5 @@
 package com.beyondguo.imprints.ui
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -9,7 +8,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,17 +19,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,6 +43,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import kotlinx.coroutines.launch
 
 private val Gold = Color(0xFFF2CE7B)
 private val DeepGreen = Color(0xFF06A854)
@@ -52,10 +53,8 @@ private val SoftSoil = Color(0xFFF3EDE3)
 private val MapInk = Color(0xFF8B7355)
 
 /**
- * 「给未来埋宝藏」感受编辑区。
- * - 空态：藏宝图卡，邀请写下要封存的心情
- * - 有字：明文可编辑（PRD 要求），底部预告「保存后刮开可见」
- * - 不把视觉涂层称作加密
+ * 「感受」编辑区 — 方案 A + 旋转箭头：
+ * 始终同一 Meta 行结构；→ 收起，点按顺时针 90° 成 ↓ 并展开，再点收回。
  */
 @Composable
 fun TreasureFeelingSection(
@@ -64,70 +63,95 @@ fun TreasureFeelingSection(
     feelingLocked: Boolean,
     onUnlock: () -> Unit,
 ) {
+    var expanded by remember { mutableStateOf(feeling.isNotBlank()) }
+    var lockedExpanded by remember { mutableStateOf(false) }
     var focused by remember { mutableStateOf(false) }
     val hasText = feeling.isNotBlank()
-    val border by animateColorAsState(
-        targetValue = when {
-            feelingLocked -> Line
-            focused -> Green
-            hasText -> Gold
-            else -> Color(0xFFD9CBB3)
-        },
-        label = "treasure-border",
-    )
+    val bringIntoView = remember { BringIntoViewRequester() }
+    val scope = rememberCoroutineScope()
+
+    // 文本变长或获得焦点时，把整块输入卡滚到键盘上方（跟随高度，不是固定偏移）
+    LaunchedEffect(focused, feeling, expanded) {
+        if (focused && expanded) {
+            kotlinx.coroutines.delay(30)
+            runCatching { bringIntoView.bringIntoView() }
+        }
+    }
+
+    if (feelingLocked) {
+        EditorMetaRow(
+            leadingContent = { TreasureGem(Modifier.size(20.dp)) },
+            leadingTint = Color(0xFFF7F4EC),
+            title = "感受",
+            subtitle = "加密已开启 · 验证后才能填写",
+            titleColor = Ink,
+            onClick = { lockedExpanded = !lockedExpanded },
+            trailing = EditorMetaTrailing.Expand,
+            expanded = lockedExpanded,
+        )
+        if (lockedExpanded) {
+            Spacer(Modifier.height(6.dp))
+            TreasureLockedCard(onUnlock = onUnlock)
+        }
+        return
+    }
+
+    val subtitle = when {
+        !expanded && hasText -> feeling.replace('\n', ' ').take(20) + if (feeling.length > 20) "…" else ""
+        !expanded -> "可选 · 保存后刮开可见"
+        hasText -> null
+        else -> "写下那一刻的感受"
+    }
 
     Column(Modifier.fillMaxWidth()) {
-        // 标题：宝藏隐喻（副标题按需求去掉）
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TreasureGem(Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text("埋一件给未来的宝藏", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        }
-        Spacer(Modifier.height(14.dp))
+        EditorMetaRow(
+            leadingContent = { TreasureGem(Modifier.size(20.dp)) },
+            leadingTint = Color(0xFFF7F4EC),
+            title = "感受",
+            subtitle = subtitle,
+            titleColor = if (expanded) Ink else if (hasText) Ink else Quiet,
+            onClick = { expanded = !expanded },
+            trailing = EditorMetaTrailing.Expand,
+            expanded = expanded,
+        )
 
-        if (feelingLocked) {
-            // 锁态：宝箱待开
-            TreasureLockedCard(onUnlock = onUnlock)
-            return
-        }
+        if (!expanded) return@Column
 
-        // 藏宝图容器
+        Spacer(Modifier.height(4.dp))
         Box(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .background(
-                    if (hasText) Color(0xFFFFFDF8) else SoftSoil
+                .bringIntoViewRequester(bringIntoView)
+                .clip(RoundedCornerShape(14.dp))
+                .background(if (hasText) Color(0xFFFFFDF8) else SoftSoil)
+                .border(
+                    1.dp,
+                    if (focused) Green else Color(0xFFE5DCCB),
+                    RoundedCornerShape(14.dp),
                 )
-                .border(1.5.dp, border, RoundedCornerShape(18.dp)),
+                .onFocusChanged { /* outer box 不接收焦点 */ },
         ) {
-            // 地图虚线角标（四角星 + 点线）
-            Canvas(Modifier.matchParentSize()) {
-                drawDashedCorners()
-            }
-
-            Column(Modifier.padding(horizontal = 14.dp, vertical = 14.dp)) {
-                if (!hasText && !focused) {
-                    // 空态引导：像地图上的 X 标记
-                    TreasureEmptyHint()
-                    Spacer(Modifier.height(10.dp))
-                }
-
+            Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                 OutlinedTextField(
                     value = feeling,
                     onValueChange = onFeelingChange,
                     placeholder = {
                         Text(
-                            if (focused) "写下要封存给未来的话…"
-                            else "点此写下，埋给未来的你",
-                            color = MapInk.copy(alpha = 0.7f),
+                            "那一刻，你有什么感受？",
+                            color = MapInk.copy(alpha = 0.65f),
                             fontSize = 15.sp,
                         )
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .onFocusChanged { focused = it.isFocused },
-                    minLines = 3,
+                        .onFocusChanged {
+                            val now = it.isFocused
+                            if (now && !focused) {
+                                scope.launch { bringIntoView.bringIntoView() }
+                            }
+                            focused = now
+                        },
+                    minLines = 2,
                     maxLines = 8,
                     textStyle = androidx.compose.ui.text.TextStyle(
                         fontSize = 16.sp,
@@ -144,35 +168,6 @@ fun TreasureFeelingSection(
                         unfocusedTextColor = Ink,
                     ),
                 )
-
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // 封存预告
-                    if (hasText) {
-                        SealedPreviewChip()
-                        Spacer(Modifier.weight(1f))
-                        Text("${feeling.length} 字", color = Quiet, fontSize = 11.sp)
-                        TextButton(
-                            onClick = { onFeelingChange("") },
-                            modifier = Modifier.padding(start = 4.dp),
-                        ) {
-                            Text("清除", color = Quiet, fontSize = 12.sp)
-                        }
-                    } else {
-                        Text(
-                            "✦ 封存于本机 · 刮开可见",
-                            color = MapInk.copy(alpha = 0.75f),
-                            fontSize = 11.sp,
-                        )
-                        Spacer(Modifier.weight(1f))
-                        if (focused) {
-                            Text("写完点右上「保存」埋下", color = Green, fontSize = 11.sp)
-                        }
-                    }
-                }
             }
         }
     }
