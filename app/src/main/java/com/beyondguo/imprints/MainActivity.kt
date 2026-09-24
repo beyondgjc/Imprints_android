@@ -38,12 +38,8 @@ class MainActivity : FragmentActivity() {
             statusBarStyle = SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
         )
-        val isDebugEmulator = applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 &&
-            android.os.Build.HARDWARE in setOf("ranchu", "goldfish")
-        if (!isDebugEmulator) window.setFlags(
-            android.view.WindowManager.LayoutParams.FLAG_SECURE,
-            android.view.WindowManager.LayoutParams.FLAG_SECURE,
-        )
+        // 防截屏 + 多任务隐藏：同一开关（FLAG_SECURE），默认开
+        com.beyondguo.imprints.privacy.PrivacyPreferences.apply(this)
         lifecycleScope.launch {
             lockEnabled = security.state().appLockHeaderJson != null
             appLocked.value = lockEnabled
@@ -76,9 +72,17 @@ class MainActivity : FragmentActivity() {
                     requestBiometric = { target, onSuccess, onUnavailable ->
                         promptBiometric(target, onSuccess, onUnavailable)
                     },
+                    onPrivacyFlagsChanged = {
+                        com.beyondguo.imprints.privacy.PrivacyPreferences.apply(this)
+                    },
                 )
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        com.beyondguo.imprints.privacy.PrivacyPreferences.apply(this)
     }
 
     override fun onStart() {
@@ -91,6 +95,7 @@ class MainActivity : FragmentActivity() {
 
     override fun onStop() {
         super.onStop()
+        com.beyondguo.imprints.privacy.PrivacyPreferences.apply(this)
         security.clearFeelingSession()
         revealEpoch.intValue++
         if (lockEnabled) appLocked.value = true

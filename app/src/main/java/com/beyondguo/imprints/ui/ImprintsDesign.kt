@@ -1,7 +1,6 @@
 package com.beyondguo.imprints.ui
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -10,8 +9,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -48,6 +48,28 @@ internal fun SettingsAction(title: String, subtitle: String, trailing: String = 
                 if (subtitle.isNotBlank()) Text(subtitle, color = Quiet, fontSize = 12.sp, lineHeight = 18.sp)
             }
             Text(trailing, color = Quiet, fontSize = 20.sp)
+        }
+    }
+}
+
+/** 设置页开关行：标题 + 副标题 + Switch */
+@Composable
+internal fun SettingsSwitch(title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    OutlinePanel(Modifier.fillMaxWidth().clickable { onCheckedChange(!checked) }) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(title, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                if (subtitle.isNotBlank()) Text(subtitle, color = Quiet, fontSize = 12.sp, lineHeight = 18.sp)
+            }
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+                colors = SwitchDefaults.colors(
+                    checkedTrackColor = Green,
+                    checkedThumbColor = Color.White,
+                ),
+            )
         }
     }
 }

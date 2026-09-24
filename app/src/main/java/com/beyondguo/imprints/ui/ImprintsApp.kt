@@ -1,10 +1,7 @@
 package com.beyondguo.imprints.ui
 
-import android.app.DatePickerDialog
-import android.app.TimePickerDialog
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
@@ -18,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
@@ -28,7 +24,6 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -36,7 +31,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material.icons.Icons
@@ -47,7 +41,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -63,19 +56,13 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
-import com.beyondguo.imprints.data.AudioChoice
 import com.beyondguo.imprints.backup.BackupPreview
 import com.beyondguo.imprints.backup.BackupService
 import com.beyondguo.imprints.data.ImprintDatabase
-import com.beyondguo.imprints.data.EntryDetail
-import com.beyondguo.imprints.data.EntryDraft
 import com.beyondguo.imprints.data.EntryEntity
 import com.beyondguo.imprints.data.ImprintRepository
-import com.beyondguo.imprints.data.MediaChoice
 import kotlinx.coroutines.launch
 import android.net.Uri
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 
 private sealed interface Page {
     data object Timeline : Page
@@ -98,6 +85,7 @@ fun ImprintsApp(
     unlockApp: suspend (String) -> Boolean,
     refreshLockState: suspend () -> Unit,
     requestBiometric: (String, () -> Unit, () -> Unit) -> Unit,
+    onPrivacyFlagsChanged: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
@@ -272,6 +260,7 @@ fun ImprintsApp(
                     },
                     onExport = { backupAction = "export" },
                     onImport = { openBackup.launch(arrayOf("*/*")) },
+                    onPrivacyFlagsChanged = onPrivacyFlagsChanged,
                 )
                 Page.Recycle -> RecyclePage(recycled,
                     onOpen = { page = Page.RecycleDetail(it) },
@@ -484,7 +473,12 @@ private fun SettingsPage(
     onRecycle: () -> Unit, onFeeling: () -> Unit, onFeelingBio: () -> Unit, onFeelingPinChange: () -> Unit,
     onAppLock: () -> Unit, onAppBio: () -> Unit, onAppPinChange: () -> Unit,
     onExport: () -> Unit, onImport: () -> Unit,
+    onPrivacyFlagsChanged: () -> Unit = {},
 ) {
+    val context = LocalContext.current
+    var secureWindow by remember {
+        mutableStateOf(com.beyondguo.imprints.privacy.PrivacyPreferences.isEnabled(context))
+    }
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Spacer(Modifier.height(10.dp)) }
         item { Text("本机存储", color = Quiet, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
@@ -510,6 +504,17 @@ private fun SettingsPage(
             item { SettingsAction(if (appBio) "关闭应用锁生物识别" else "开启应用锁生物识别",
                 "用于解锁应用", onClick = onAppBio) }
         }
+        // FLAG_SECURE 同时挡住截屏与多任务快照，合并为一个开关
+        item { SettingsSwitch(
+            title = "防截屏与多任务保护",
+            subtitle = "开启后无法截屏/录屏，且多任务列表不显示页面详情",
+            checked = secureWindow,
+            onCheckedChange = { value ->
+                secureWindow = value
+                com.beyondguo.imprints.privacy.PrivacyPreferences.setEnabled(context, value)
+                onPrivacyFlagsChanged()
+            },
+        ) }
         item { Spacer(Modifier.height(8.dp)) }
         item { Text("数据导入与导出", color = Quiet, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
         item { Text("把印迹保存在自己手里。手动备份，不会自动上传或同步。",
