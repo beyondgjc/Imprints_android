@@ -79,12 +79,14 @@ internal fun SettingsRow(
     danger: Boolean = false,
     onClick: (() -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
+    /** 父开关下的子条目缩进 */
+    indent: Boolean = false,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(horizontal = 16.dp, vertical = 13.dp),
+            .padding(start = if (indent) 28.dp else 16.dp, end = 16.dp, top = 13.dp, bottom = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(
@@ -94,7 +96,7 @@ internal fun SettingsRow(
             Text(
                 title,
                 color = if (danger) Danger else Ink,
-                fontSize = 15.sp,
+                fontSize = if (indent) 14.sp else 15.sp,
                 fontWeight = FontWeight.Medium,
             )
             if (!subtitle.isNullOrBlank()) {

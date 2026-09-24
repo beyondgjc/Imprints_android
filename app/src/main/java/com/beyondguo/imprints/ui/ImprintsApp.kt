@@ -643,36 +643,51 @@ private fun SettingsPage(
         item { SettingsSectionLabel("隐私与安全") }
         item {
             SettingsGroup {
-                SettingsRow(
-                    title = if (feelingMode == "ON") "关闭感受加密" else "感受单独加密",
-                    subtitle = if (feelingMode == "ON") "查看前先验证，再刮开涂层"
+                SettingsSwitchRow(
+                    title = "感受单独加密",
+                    subtitle = if (feelingMode == "ON") "已开启 · 查看前先验证，再刮开涂层"
                     else "保存后绿涂层遮挡，浏览时刮开",
-                    onClick = onFeeling,
+                    checked = feelingMode == "ON",
+                    onCheckedChange = { onFeeling() },
                 )
                 if (feelingMode == "ON") {
                     FineDivider()
-                    SettingsRow("修改感受口令", "6 位数字", onClick = onFeelingPinChange)
+                    SettingsRow(
+                        title = "修改感受口令",
+                        subtitle = "6 位数字",
+                        onClick = onFeelingPinChange,
+                        indent = true,
+                    )
                     FineDivider()
                     SettingsRow(
                         title = if (feelingBio) "关闭感受生物识别" else "开启感受生物识别",
-                        subtitle = "用于查看加密感受",
+                        subtitle = if (feelingBio) "已开启 · 查看时优先指纹" else "用于查看加密感受",
                         onClick = onFeelingBio,
+                        indent = true,
                     )
                 }
                 FineDivider()
-                SettingsRow(
-                    title = if (appLock) "关闭应用锁" else "应用锁",
-                    subtitle = if (appLock) "每次重新进入应用都需验证" else "打开应用时验证 6 位口令",
-                    onClick = onAppLock,
+                SettingsSwitchRow(
+                    title = "应用锁",
+                    subtitle = if (appLock) "已开启 · 每次重新进入应用都需验证"
+                    else "打开应用时验证 6 位口令",
+                    checked = appLock,
+                    onCheckedChange = { onAppLock() },
                 )
                 if (appLock) {
                     FineDivider()
-                    SettingsRow("修改解锁密码", "6 位数字", onClick = onAppPinChange)
+                    SettingsRow(
+                        title = "修改解锁密码",
+                        subtitle = "6 位数字",
+                        onClick = onAppPinChange,
+                        indent = true,
+                    )
                     FineDivider()
                     SettingsRow(
                         title = if (appBio) "关闭应用锁生物识别" else "开启应用锁生物识别",
-                        subtitle = "用于解锁应用 · 冷启动自动拉起指纹",
+                        subtitle = if (appBio) "已开启 · 冷启动自动拉起指纹" else "用于解锁应用",
                         onClick = onAppBio,
+                        indent = true,
                     )
                 }
             }
