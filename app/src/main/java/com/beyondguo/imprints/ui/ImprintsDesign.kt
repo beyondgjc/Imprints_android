@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -26,6 +27,9 @@ internal val Quiet = Color(0xFF858D9B)
 internal val Line = Color(0xFFE8E7E3)
 internal val Green = Color(0xFF07B85D)
 internal val PaleGreen = Color(0xFFE7F9EF)
+/** 分组卡片底（对齐 Penly PenBgSoft） */
+internal val SoftCard = Color(0xFFF2F3F5)
+internal val Danger = Color(0xFFD92D20)
 
 @Composable
 internal fun SectionTitle(title: String, modifier: Modifier = Modifier) {
@@ -38,30 +42,81 @@ internal fun OutlinePanel(modifier: Modifier = Modifier, content: @Composable ()
         border = BorderStroke(1.dp, Line), content = content)
 }
 
+/** 小节标签：12sp 灰字，对齐 Penly SectionTitle */
 @Composable
-internal fun SettingsAction(title: String, subtitle: String, trailing: String = "›", onClick: () -> Unit) {
-    OutlinePanel(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 18.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(title, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                if (subtitle.isNotBlank()) Text(subtitle, color = Quiet, fontSize = 12.sp, lineHeight = 18.sp)
+internal fun SettingsSectionLabel(title: String, modifier: Modifier = Modifier) {
+    Text(
+        title,
+        modifier.padding(start = 4.dp, top = 14.dp, bottom = 6.dp),
+        color = Quiet,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Medium,
+    )
+}
+
+/** 分组卡片：浅灰底，多行共用一卡（对齐 Penly SettingCard） */
+@Composable
+internal fun SettingsGroup(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Surface(
+        modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = SoftCard,
+        content = { Column(content = content) },
+    )
+}
+
+/**
+ * 紧凑设置行：标题 + 可选副标题 + 可选 trailing（对齐 Penly SettingRow）。
+ * padding vertical 13dp，比旧 SettingsAction（18dp 独立描边卡）更密。
+ */
+@Composable
+internal fun SettingsRow(
+    title: String,
+    subtitle: String? = null,
+    danger: Boolean = false,
+    onClick: (() -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                title,
+                color = if (danger) Danger else Ink,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            if (!subtitle.isNullOrBlank()) {
+                Text(subtitle, color = Quiet, fontSize = 12.sp, lineHeight = 17.sp)
             }
-            Text(trailing, color = Quiet, fontSize = 20.sp)
         }
+        trailing?.invoke()
     }
 }
 
-/** 设置页开关行：标题 + 副标题 + Switch */
 @Composable
-internal fun SettingsSwitch(title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    OutlinePanel(Modifier.fillMaxWidth().clickable { onCheckedChange(!checked) }) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(title, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                if (subtitle.isNotBlank()) Text(subtitle, color = Quiet, fontSize = 12.sp, lineHeight = 18.sp)
-            }
+internal fun SettingsSwitchRow(
+    title: String,
+    subtitle: String? = null,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    SettingsRow(
+        title = title,
+        subtitle = subtitle,
+        onClick = { onCheckedChange(!checked) },
+        trailing = {
             Switch(
                 checked = checked,
                 onCheckedChange = onCheckedChange,
@@ -70,9 +125,11 @@ internal fun SettingsSwitch(title: String, subtitle: String, checked: Boolean, o
                     checkedThumbColor = Color.White,
                 ),
             )
-        }
-    }
+        },
+    )
 }
 
 @Composable
-internal fun FineDivider() { HorizontalDivider(color = Line, thickness = 1.dp) }
+internal fun FineDivider(modifier: Modifier = Modifier) {
+    HorizontalDivider(modifier.padding(horizontal = 16.dp), color = Color(0xFFE4E5E7), thickness = 1.dp)
+}

@@ -617,55 +617,86 @@ private fun SettingsPage(
     var secureWindow by remember {
         mutableStateOf(com.beyondguo.imprints.privacy.PrivacyPreferences.isEnabled(context))
     }
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Spacer(Modifier.height(10.dp)) }
-        item { Text("本机存储", color = Quiet, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
-        item { Text("印迹只保存在这台设备，不上传、不同步。",
-            color = Ink, fontSize = 15.sp, lineHeight = 23.sp) }
-        item { Spacer(Modifier.height(8.dp)) }
-        item { SettingsAction("回收站", "保留 7 天", onClick = onRecycle) }
-        item { Spacer(Modifier.height(8.dp)) }
-        item { Text("隐私与安全", color = Quiet, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
-        item { SettingsAction(if (feelingMode == "ON") "关闭感受加密" else "感受单独加密",
-            if (feelingMode == "ON") "已开启 · 查看前需验证，再刮开涂层"
-            else "保存后以品牌绿涂层遮挡，浏览时刮开可见",
-            onClick = onFeeling) }
-        if (feelingMode == "ON") {
-            item { SettingsAction("修改感受口令", "6 位数字", onClick = onFeelingPinChange) }
-            item { SettingsAction(if (feelingBio) "关闭感受生物识别" else "开启感受生物识别",
-                "用于查看加密感受", onClick = onFeelingBio) }
+    // 对齐 Penly：小节标签 + 浅灰分组卡 + 紧凑行，去掉一卡一项与大段说明
+    LazyColumn(
+        Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        item { SettingsSectionLabel("本机存储") }
+        item {
+            SettingsGroup {
+                SettingsRow("回收站", "删除的印迹保留 7 天", onClick = onRecycle)
+                FineDivider()
+                SettingsSwitchRow(
+                    title = "防截屏与多任务保护",
+                    subtitle = "无法截屏/录屏，多任务不显示页面详情",
+                    checked = secureWindow,
+                    onCheckedChange = { value ->
+                        secureWindow = value
+                        com.beyondguo.imprints.privacy.PrivacyPreferences.setEnabled(context, value)
+                        onPrivacyFlagsChanged()
+                    },
+                )
+            }
         }
-        item { SettingsAction(if (appLock) "关闭应用锁" else "应用锁",
-            if (appLock) "已开启 · 每次重新进入应用都需验证" else "打开应用时验证 6 位口令", onClick = onAppLock) }
-        if (appLock) {
-            item { SettingsAction("修改解锁密码", "6 位数字", onClick = onAppPinChange) }
-            item { SettingsAction(if (appBio) "关闭应用锁生物识别" else "开启应用锁生物识别",
-                "用于解锁应用", onClick = onAppBio) }
+
+        item { SettingsSectionLabel("隐私与安全") }
+        item {
+            SettingsGroup {
+                SettingsRow(
+                    title = if (feelingMode == "ON") "关闭感受加密" else "感受单独加密",
+                    subtitle = if (feelingMode == "ON") "查看前先验证，再刮开涂层"
+                    else "保存后绿涂层遮挡，浏览时刮开",
+                    onClick = onFeeling,
+                )
+                if (feelingMode == "ON") {
+                    FineDivider()
+                    SettingsRow("修改感受口令", "6 位数字", onClick = onFeelingPinChange)
+                    FineDivider()
+                    SettingsRow(
+                        title = if (feelingBio) "关闭感受生物识别" else "开启感受生物识别",
+                        subtitle = "用于查看加密感受",
+                        onClick = onFeelingBio,
+                    )
+                }
+                FineDivider()
+                SettingsRow(
+                    title = if (appLock) "关闭应用锁" else "应用锁",
+                    subtitle = if (appLock) "每次重新进入应用都需验证" else "打开应用时验证 6 位口令",
+                    onClick = onAppLock,
+                )
+                if (appLock) {
+                    FineDivider()
+                    SettingsRow("修改解锁密码", "6 位数字", onClick = onAppPinChange)
+                    FineDivider()
+                    SettingsRow(
+                        title = if (appBio) "关闭应用锁生物识别" else "开启应用锁生物识别",
+                        subtitle = "用于解锁应用 · 冷启动自动拉起指纹",
+                        onClick = onAppBio,
+                    )
+                }
+            }
         }
-        // FLAG_SECURE 同时挡住截屏与多任务快照，合并为一个开关
-        item { SettingsSwitch(
-            title = "防截屏与多任务保护",
-            subtitle = "开启后无法截屏/录屏，且多任务列表不显示页面详情",
-            checked = secureWindow,
-            onCheckedChange = { value ->
-                secureWindow = value
-                com.beyondguo.imprints.privacy.PrivacyPreferences.setEnabled(context, value)
-                onPrivacyFlagsChanged()
-            },
-        ) }
-        item { Spacer(Modifier.height(8.dp)) }
-        item { Text("数据导入与导出", color = Quiet, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
-        item { Text("把印迹保存在自己手里。手动备份，不会自动上传或同步。",
-            color = Ink, fontSize = 14.sp, lineHeight = 22.sp) }
-        item { SettingsAction("导出加密备份", "包含本机全部印迹和附件", onClick = onExport) }
-        item { SettingsAction("导入备份", "先校验和预览，不覆盖现有数据", onClick = onImport) }
-        item { Text("备份文件需要独立口令。\n请妥善保存文件和口令。",
-            Modifier.fillMaxWidth().padding(top = 4.dp),
-            color = Quiet, fontSize = 12.sp, lineHeight = 18.sp) }
-        item { Text("本地保存 · 手动备份\n分享与同步留待以后\n无需注册或登录",
-            Modifier.fillMaxWidth().padding(vertical = 36.dp),
-            color = Green, fontSize = 13.sp, lineHeight = 22.sp,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
+
+        item { SettingsSectionLabel("数据") }
+        item {
+            SettingsGroup {
+                SettingsRow("导出备份", "包含本机全部印迹和附件 · 需独立口令", onClick = onExport)
+                FineDivider()
+                SettingsRow("导入备份", "先校验和预览，不覆盖现有数据", onClick = onImport)
+            }
+        }
+
+        item {
+            Text(
+                "不有佳咏，何伸雅怀？",
+                Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 20.dp),
+                color = Green,
+                fontSize = 12.sp,
+                lineHeight = 20.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+        }
     }
 }
 
