@@ -556,13 +556,16 @@ private fun LockPage(
     onBiometric: () -> Unit,
 ) {
     var pin by remember { mutableStateOf("") }
-    Column(Modifier.fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.Center,
-        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
-        Text("印迹", color = Green, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(14.dp))
-        Text("欢迎回来", color = Ink, fontSize = 30.sp, fontWeight = FontWeight.Bold)
-        Text("输入 6 位口令，继续你的记录", color = Quiet, fontSize = 14.sp)
-        Spacer(Modifier.height(32.dp))
+    // 底部 padding 大于顶部 → 静态整体偏上；imePadding → 键盘弹起时内容上移，解锁键不被遮挡
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(start = 28.dp, end = 28.dp, top = 28.dp, bottom = 96.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+    ) {
+        Text("印迹", color = Green, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(36.dp))
         PinField(pin) { pin = it; }
         if (error != null) {
             Spacer(Modifier.height(10.dp))
