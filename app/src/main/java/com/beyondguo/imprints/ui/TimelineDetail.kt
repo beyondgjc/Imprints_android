@@ -29,6 +29,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Lock
@@ -45,6 +46,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
@@ -60,6 +62,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -241,12 +244,76 @@ fun TimelinePage(
                             }
                         }
                         if (entry.body.isNotBlank()) {
-                            var expanded by remember(entry.id) { mutableStateOf(false) }
-                            Text(entry.body, Modifier.fillMaxWidth(),
-                                color = Ink, fontSize = 17.sp, lineHeight = 27.sp,
-                                maxLines = if (expanded) Int.MAX_VALUE else 2)
-                            if (entry.body.length > 80) Text(if (expanded) "收起" else "展开",
-                                Modifier.clickable { expanded = !expanded }, color = Green, fontSize = 14.sp)
+                            // 知乎式：截断时「展开 ∨」浮在末行右下角（背景遮罩）；
+                            // 展开后正文完整显示，「收起 ∧」另起一行右对齐，不遮盖末行文字。
+                            var expanded by rememberSaveable(entry.id) { mutableStateOf(false) }
+                            var clamped by rememberSaveable(entry.id) { mutableStateOf(false) }
+                            if (expanded) {
+                                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        entry.body,
+                                        Modifier.fillMaxWidth(),
+                                        color = Ink, fontSize = 17.sp, lineHeight = 27.sp,
+                                    )
+                                    Row(
+                                        Modifier
+                                            .clickable { expanded = false }
+                                            .padding(top = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            "收起",
+                                            color = Green,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Medium,
+                                        )
+                                        Icon(
+                                            Icons.Default.KeyboardArrowUp,
+                                            contentDescription = "收起正文",
+                                            tint = Green,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                }
+                            } else {
+                                Box(Modifier.fillMaxWidth()) {
+                                    Text(
+                                        entry.body,
+                                        Modifier.fillMaxWidth(),
+                                        onTextLayout = { result ->
+                                            if (result.lineCount > 0) {
+                                                clamped = result.isLineEllipsized(result.lineCount - 1)
+                                            }
+                                        },
+                                        color = Ink, fontSize = 17.sp, lineHeight = 27.sp,
+                                        maxLines = 5,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    if (clamped) {
+                                        Row(
+                                            Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .background(MaterialTheme.colorScheme.background)
+                                                .clickable { expanded = true }
+                                                .padding(start = 24.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Text(
+                                                "展开",
+                                                color = Green,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Medium,
+                                            )
+                                            Icon(
+                                                Icons.Default.KeyboardArrowDown,
+                                                contentDescription = "展开正文",
+                                                tint = Green,
+                                                modifier = Modifier.size(16.dp),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                         details[entry.id]?.let { detail ->
                             if (detail.visuals.isNotEmpty()) MomentsMediaGrid(
