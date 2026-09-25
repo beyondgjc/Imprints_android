@@ -301,6 +301,7 @@ fun ImprintsApp(
                     },
                     onExport = { backupAction = "export" },
                     onImport = { openBackup.launch(arrayOf("*/*")) },
+                    onLockNow = { scope.launch { refreshLockState() } },
                     onPrivacyFlagsChanged = onPrivacyFlagsChanged,
                 )
                 Page.Recycle -> RecyclePage(recycled,
@@ -613,6 +614,7 @@ private fun SettingsPage(
     feelingMode: String, feelingBio: Boolean, appLock: Boolean, appBio: Boolean,
     onRecycle: () -> Unit, onFeeling: () -> Unit, onFeelingBio: () -> Unit, onFeelingPinChange: () -> Unit,
     onAppLock: () -> Unit, onAppBio: () -> Unit, onAppPinChange: () -> Unit,
+    onLockNow: () -> Unit,
     onExport: () -> Unit, onImport: () -> Unit,
     onPrivacyFlagsChanged: () -> Unit = {},
 ) {
@@ -620,32 +622,30 @@ private fun SettingsPage(
     var secureWindow by remember {
         mutableStateOf(com.beyondguo.imprints.privacy.PrivacyPreferences.isEnabled(context))
     }
+    // 关于：仅展示当前版本（不做检查更新——仓库私有，应用内拉不到版本信息）
+    val versionName = remember(context) {
+        runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: ""
+        }.getOrDefault("")
+    }
     // 对齐 Penly：小节标签 + 浅灰分组卡 + 紧凑行，去掉一卡一项与大段说明
     LazyColumn(
         Modifier.fillMaxSize().padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        item { SettingsSectionLabel("本机存储") }
-        item {
-            SettingsGroup {
-                SettingsRow("回收站", "删除的印迹保留 7 天", onClick = onRecycle)
-                FineDivider()
-                SettingsSwitchRow(
-                    title = "防截屏与多任务保护",
-                    subtitle = "无法截屏/录屏，多任务不显示页面详情",
-                    checked = secureWindow,
-                    onCheckedChange = { value ->
-                        secureWindow = value
-                        com.beyondguo.imprints.privacy.PrivacyPreferences.setEnabled(context, value)
-                        onPrivacyFlagsChanged()
-                    },
-                )
-            }
-        }
-
         item { SettingsSectionLabel("隐私与安全") }
         item {
             SettingsGroup {
+                // 立即锁定（对齐 Penly 安全组首位）：仅在应用锁已开启时出现，
+                // 否则锁上后没有口令可解，会把自己关在外面
+                if (appLock) {
+                    SettingsRow(
+                        title = "立即锁定",
+                        subtitle = "清除会话，回到锁屏",
+                        onClick = onLockNow,
+                    )
+                    FineDivider()
+                }
                 SettingsSwitchRow(
                     title = "感受单独加密",
                     subtitle = if (feelingMode == "ON") "已开启 · 查看前先验证，再刮开涂层"
@@ -662,10 +662,11 @@ private fun SettingsPage(
                         indent = true,
                     )
                     FineDivider()
-                    SettingsRow(
-                        title = if (feelingBio) "关闭感受生物识别" else "开启感受生物识别",
+                    SettingsSwitchRow(
+                        title = "感受生物识别",
                         subtitle = if (feelingBio) "已开启 · 查看时优先指纹" else "用于查看加密感受",
-                        onClick = onFeelingBio,
+                        checked = feelingBio,
+                        onCheckedChange = { onFeelingBio() },
                         indent = true,
                     )
                 }
@@ -686,13 +687,25 @@ private fun SettingsPage(
                         indent = true,
                     )
                     FineDivider()
-                    SettingsRow(
-                        title = if (appBio) "关闭应用锁生物识别" else "开启应用锁生物识别",
+                    SettingsSwitchRow(
+                        title = "应用锁生物识别",
                         subtitle = if (appBio) "已开启 · 冷启动自动拉起指纹" else "用于解锁应用",
-                        onClick = onAppBio,
+                        checked = appBio,
+                        onCheckedChange = { onAppBio() },
                         indent = true,
                     )
                 }
+                FineDivider()
+                SettingsSwitchRow(
+                    title = "防截屏与多任务保护",
+                    subtitle = "无法截屏/录屏，多任务不显示页面详情",
+                    checked = secureWindow,
+                    onCheckedChange = { value ->
+                        secureWindow = value
+                        com.beyondguo.imprints.privacy.PrivacyPreferences.setEnabled(context, value)
+                        onPrivacyFlagsChanged()
+                    },
+                )
             }
         }
 
@@ -702,6 +715,18 @@ private fun SettingsPage(
                 SettingsRow("导出备份", "包含本机全部印迹和附件 · 需独立口令", onClick = onExport)
                 FineDivider()
                 SettingsRow("导入备份", "先校验和预览，不覆盖现有数据", onClick = onImport)
+                FineDivider()
+                SettingsRow("回收站", "删除的印迹保留 7 天", onClick = onRecycle)
+            }
+        }
+
+        item { SettingsSectionLabel("关于") }
+        item {
+            SettingsGroup {
+                SettingsRow(
+                    title = "版本",
+                    trailing = { Text("v$versionName", color = Quiet, fontSize = 13.sp) },
+                )
             }
         }
 

@@ -113,10 +113,12 @@ internal fun SettingsSwitchRow(
     subtitle: String? = null,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    indent: Boolean = false,
 ) {
     SettingsRow(
         title = title,
         subtitle = subtitle,
+        indent = indent,
         onClick = { onCheckedChange(!checked) },
         trailing = {
             Switch(
