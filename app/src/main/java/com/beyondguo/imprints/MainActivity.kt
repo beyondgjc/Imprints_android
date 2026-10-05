@@ -1,5 +1,6 @@
 package com.beyondguo.imprints
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -33,6 +34,38 @@ class MainActivity : FragmentActivity() {
     private var revealEpoch = androidx.compose.runtime.mutableIntStateOf(0)
     /** 生物识别弹窗期间不清感受会话，否则注册/解锁成功回调时 FEK 已被清掉 */
     private var biometricPromptActive = false
+    /**
+     * 正在跳系统 Activity（选图/选文件/分享等）的深度。
+     * 这些跳转会触发 onStop，不能当成「离开应用」而上锁、清感受会话。
+     */
+    private var externalUiDepth = 0
+
+    override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) {
+        externalUiDepth++
+        try {
+            super.startActivityForResult(intent, requestCode, options)
+        } catch (error: Exception) {
+            externalUiDepth--
+            throw error
+        }
+    }
+
+    override fun startIntentSenderForResult(
+        intent: android.content.IntentSender,
+        requestCode: Int,
+        fillInIntent: Intent?,
+        flagsMask: Int,
+        flagsValues: Int,
+        extraFlags: Int,
+    ) {
+        externalUiDepth++
+        try {
+            super.startIntentSenderForResult(intent, requestCode, fillInIntent, flagsMask, flagsValues, extraFlags)
+        } catch (error: Exception) {
+            externalUiDepth--
+            throw error
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -98,6 +131,12 @@ class MainActivity : FragmentActivity() {
     override fun onStop() {
         super.onStop()
         com.beyondguo.imprints.privacy.PrivacyPreferences.apply(this)
+        // 选图器等系统页：只是一层临时覆盖，回来仍应在编辑状态
+        if (externalUiDepth > 0) {
+            externalUiDepth--
+            android.util.Log.i("ImprintsLock", "onStop skip lock (externalUi depth=$externalUiDepth)")
+            return
+        }
         // 指纹系统弹窗可能触发 onStop；此刻清会话会导致「刚输完口令开指纹却注册失败」
         if (!biometricPromptActive) {
             security.clearFeelingSession()
