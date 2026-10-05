@@ -86,15 +86,24 @@ private object PlaybackFocus {
     fun stopped(player: ExoPlayer) { if (active === player) active = null }
 }
 
+/** 时间线/详情媒体单元；motionVideo 为动态照片附属短视频 */
+data class MediaCell(
+    val file: File,
+    val kind: String,
+    val motionVideo: File? = null,
+)
+
 @Composable
 fun MediaThumbnail(
     file: File, kind: String, modifier: Modifier = Modifier,
-    viewerCells: List<Pair<File, String>> = listOf(file to kind),
+    motionVideo: File? = null,
+    viewerCells: List<MediaCell> = listOf(MediaCell(file, kind, motionVideo)),
     startIndex: Int = 0,
 ) {
     val appLocked = LocalImprintsLocked.current
     var open by remember(file.path) { mutableStateOf(false) }
-    val bitmap by produceState<Bitmap?>(null, file.path) {
+    val hasMotion = motionVideo != null && motionVideo.isFile
+    val bitmap by produceState<Bitmap?>(null, file.path, hasMotion) {
         value = withContext(Dispatchers.IO) {
             runCatching {
                 if (kind == "VIDEO") {
@@ -115,10 +124,13 @@ fun MediaThumbnail(
         .clickable { open = true }, contentAlignment = Alignment.Center) {
         if (bitmap == null) Text(if (kind == "VIDEO") "视频" else "图片", color = Quiet)
         else Image(bitmap!!.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        if (kind == "VIDEO") Surface(shape = CircleShape, color = Color(0xB3222830)) {
+        if (kind == "VIDEO" || hasMotion) Surface(shape = CircleShape, color = Color(0xB3222830)) {
             Icon(Icons.Default.PlayArrow, null, Modifier.padding(5.dp), tint = Color.White)
         }
         if (kind == "GIF") Text("GIF", Modifier.align(Alignment.TopEnd).padding(5.dp)
+            .background(Ink, RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 2.dp),
+            color = Color.White, fontSize = 9.sp)
+        if (hasMotion && kind == "IMAGE") Text("动态", Modifier.align(Alignment.TopEnd).padding(5.dp)
             .background(Ink, RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 2.dp),
             color = Color.White, fontSize = 9.sp)
     }
@@ -130,7 +142,7 @@ fun MediaThumbnail(
 /** 微信式全屏查看：黑底、Fit、左右滑动切换（设计 52–56）。 */
 @Composable
 fun FullscreenMediaViewer(
-    cells: List<Pair<File, String>>,
+    cells: List<MediaCell>,
     startIndex: Int = 0,
     onClose: () -> Unit,
 ) {
@@ -147,11 +159,13 @@ fun FullscreenMediaViewer(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
             ) { index ->
-                val (file, kind) = cells[index]
-                when (kind) {
-                    "VIDEO" -> VideoViewer(file, Modifier.fillMaxSize())
-                    "GIF" -> GifViewer(file, Modifier.fillMaxSize())
-                    else -> FullscreenImageView(file)
+                val cell = cells[index]
+                when {
+                    cell.kind == "VIDEO" -> VideoViewer(cell.file, Modifier.fillMaxSize())
+                    cell.kind == "GIF" -> GifViewer(cell.file, Modifier.fillMaxSize())
+                    cell.motionVideo != null && cell.motionVideo.isFile ->
+                        VideoViewer(cell.motionVideo, Modifier.fillMaxSize())
+                    else -> FullscreenImageView(cell.file)
                 }
             }
             Row(
@@ -206,42 +220,41 @@ private fun FullscreenImageView(file: File) {
 }
 
 /**
- * 朋友圈式图片网格：1 张大图；4 张 2×2；其余 3 列方格，全部展示不折叠。
- * cells 为 (file, kind) 列表。
+ * 朋友圈式图片网格：1 张大图靠左；2/4 张 2 列；其余 3 列。
+ * cells 为 MediaCell（可携带动态照片附属视频）。
  */
 @Composable
-fun MomentsMediaGrid(cells: List<Pair<File, String>>, modifier: Modifier = Modifier) {
+fun MomentsMediaGrid(cells: List<MediaCell>, modifier: Modifier = Modifier) {
     if (cells.isEmpty()) return
     val gap = 6.dp
     if (cells.size == 1) {
-        val (file, kind) = cells.first()
-        // 单图：靠左，不居中
+        val cell = cells.first()
         MediaThumbnail(
-            file, kind,
+            cell.file, cell.kind,
             modifier
                 .wrapContentWidth(Alignment.Start)
                 .widthIn(max = 280.dp)
                 .heightIn(max = 280.dp)
                 .aspectRatio(1f, matchHeightConstraintsFirst = true),
+            motionVideo = cell.motionVideo,
             viewerCells = cells,
             startIndex = 0,
         )
         return
     }
-    // 1 已处理；2 与 4 用 2 列（单元格与 4 宫格同大）；其余 3 列
     val columns = when (cells.size) {
         2, 4 -> 2
         else -> 3
     }
-    // 固定高度约束，避免 LazyColumn 子项测量溢出盖住下方内容
     Column(modifier.heightIn(max = 480.dp), verticalArrangement = Arrangement.spacedBy(gap)) {
         var baseIndex = 0
         cells.chunked(columns).forEach { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                row.forEachIndexed { i, (file, kind) ->
+                row.forEachIndexed { i, cell ->
                     MediaThumbnail(
-                        file, kind,
+                        cell.file, cell.kind,
                         Modifier.weight(1f, fill = true).aspectRatio(1f),
+                        motionVideo = cell.motionVideo,
                         viewerCells = cells,
                         startIndex = baseIndex + i,
                     )

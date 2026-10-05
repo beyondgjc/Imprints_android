@@ -14,6 +14,8 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Upsert
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "entries", indices = [Index(value = ["deletedAtMs", "eventLocalMinute", "createdAtMs"]), Index("placeId")])
@@ -43,6 +45,10 @@ data class VisualMediaEntity(
     val byteLength: Long,
     val sha256: String,
     val createdAtMs: Long,
+    /** 动态照片附属短视频（media 根目录 UUID 文件）；普通图片为 null */
+    val motionVideoPath: String? = null,
+    val motionVideoSha256: String? = null,
+    val motionVideoByteLength: Long? = null,
 )
 
 @Entity(
@@ -168,12 +174,16 @@ interface ImprintDao {
     @Query("DELETE FROM entry_fts WHERE entryId = :id") suspend fun deleteFts(id: String)
     @Query("DELETE FROM entries WHERE id = :id") suspend fun deleteEntry(id: String)
     @Query("DELETE FROM places WHERE id = :id AND id NOT IN (SELECT placeId FROM entries WHERE placeId IS NOT NULL)") suspend fun deleteUnusedPlace(id: String)
-    @Query("SELECT relativePath FROM visual_media UNION SELECT relativePath FROM audio") suspend fun referencedFiles(): List<String>
+    @Query("SELECT relativePath FROM visual_media UNION SELECT relativePath FROM audio")
+    suspend fun referencedFiles(): List<String>
+
+    @Query("SELECT motionVideoPath FROM visual_media WHERE motionVideoPath IS NOT NULL")
+    suspend fun referencedMotionVideos(): List<String>
 }
 
 @Database(
     entities = [EntryEntity::class, VisualMediaEntity::class, AudioEntity::class, FeelingEntity::class, PlaceEntity::class, SecurityStateEntity::class, EntryFtsEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class ImprintDatabase : RoomDatabase() {
@@ -182,8 +192,18 @@ abstract class ImprintDatabase : RoomDatabase() {
     companion object {
         @Volatile private var instance: ImprintDatabase? = null
 
+        /** v1→v2：动态照片附属视频字段 */
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE visual_media ADD COLUMN motionVideoPath TEXT")
+                db.execSQL("ALTER TABLE visual_media ADD COLUMN motionVideoSha256 TEXT")
+                db.execSQL("ALTER TABLE visual_media ADD COLUMN motionVideoByteLength INTEGER")
+            }
+        }
+
         fun get(context: Context): ImprintDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, ImprintDatabase::class.java, "imprints.db")
+                .addMigrations(MIGRATION_1_2)
                 .build().also { instance = it }
         }
     }

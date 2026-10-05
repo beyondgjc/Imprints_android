@@ -64,8 +64,16 @@ class BackupService(private val context: Context, private val database: ImprintD
             val feelings = entries.mapNotNull { entry ->
                 dao.feeling(entry.id)?.let { entry.id to (security.decodeFeeling(it) ?: "") }
             }.toMap()
-            val sources = visuals.map { FileSource(it.id, repository.files.resolve(it.relativePath), it.sha256) } +
-                audio.map { FileSource(it.id, repository.files.resolve(it.relativePath), it.sha256) }
+            // 主图 + 可选动态照片附属视频
+            val sources = visuals.flatMap { v ->
+                val main = FileSource(v.id, repository.files.resolve(v.relativePath), v.sha256)
+                val motion = v.motionVideoPath?.let { path ->
+                    val sha = v.motionVideoSha256
+                        ?: error("动态照片附属视频缺少校验值：${v.id}")
+                    FileSource(path, repository.files.resolve(path), sha)
+                }
+                listOfNotNull(main, motion)
+            } + audio.map { FileSource(it.id, repository.files.resolve(it.relativePath), it.sha256) }
             val metadata = JSONObject()
                 .put("feelingMode", security.state().feelingMode)
                 .put("entries", JSONArray().apply { entries.forEach { put(entryJson(it)) } })
@@ -120,7 +128,11 @@ class BackupService(private val context: Context, private val database: ImprintD
         var attachmentBytes = 0L
         for (i in 0 until visuals.length()) {
             val item = visuals.getJSONObject(i)
-            if (item.getString("entryId") in included) attachmentBytes = Math.addExact(attachmentBytes, item.getLong("byteLength"))
+            if (item.getString("entryId") in included) {
+                attachmentBytes = Math.addExact(attachmentBytes, item.getLong("byteLength"))
+                val motionLen = item.optLong("motionVideoByteLength", 0)
+                if (motionLen > 0) attachmentBytes = Math.addExact(attachmentBytes, motionLen)
+            }
         }
         for (i in 0 until audio.length()) {
             val item = audio.getJSONObject(i)
@@ -185,7 +197,15 @@ class BackupService(private val context: Context, private val database: ImprintD
                     .filter { it.getString("entryId") in included }
                     .map { raw ->
                         val path = install(raw.getString("id"))
-                        visualFromJson(raw).copy(id = path, relativePath = path)
+                        val motionOld = raw.optString("motionVideoPath").takeIf { it.isNotEmpty() }
+                        val motionNew = motionOld?.let { install(it) }
+                        visualFromJson(raw).copy(
+                            id = path,
+                            relativePath = path,
+                            motionVideoPath = motionNew,
+                            motionVideoSha256 = motionNew?.let { raw.optString("motionVideoSha256").takeIf { s -> s.isNotEmpty() } },
+                            motionVideoByteLength = motionNew?.let { raw.optLong("motionVideoByteLength").takeIf { n -> n > 0 } },
+                        )
                     }
                 val audio = (0 until audioJson.length()).map { audioJson.getJSONObject(it) }
                     .filter { it.getString("entryId") in included }
@@ -250,6 +270,14 @@ class BackupService(private val context: Context, private val database: ImprintD
                         val item = visuals.getJSONObject(i)
                         check(expectedIds.put(item.getString("id"), item.getString("sha256") to item.getLong("byteLength")) == null) { "附件 ID 重复" }
                         if (item.getString("entryId") in retainedEntryIds) retainedFileIds += item.getString("id")
+                        val motionId = item.optString("motionVideoPath").takeIf { it.isNotEmpty() }
+                        if (motionId != null) {
+                            val motionSha = item.optString("motionVideoSha256")
+                            val motionLen = item.optLong("motionVideoByteLength", 0)
+                            check(motionSha.isNotEmpty() && motionLen > 0) { "动态照片附属视频元数据无效" }
+                            check(expectedIds.put(motionId, motionSha to motionLen) == null) { "附件 ID 重复" }
+                            if (item.getString("entryId") in retainedEntryIds) retainedFileIds += motionId
+                        }
                     }
                     for (i in 0 until audio.length()) {
                         val item = audio.getJSONObject(i)
@@ -330,8 +358,14 @@ class BackupService(private val context: Context, private val database: ImprintD
     private fun visualJson(v: VisualMediaEntity) = JSONObject().put("id", v.id).put("entryId", v.entryId)
         .put("kind", v.kind).put("ordinal", v.ordinal).put("mime", v.mime)
         .put("byteLength", v.byteLength).put("sha256", v.sha256).put("createdAtMs", v.createdAtMs)
+        .put("motionVideoPath", v.motionVideoPath ?: "")
+        .put("motionVideoSha256", v.motionVideoSha256 ?: "")
+        .put("motionVideoByteLength", v.motionVideoByteLength ?: 0L)
     private fun visualFromJson(j: JSONObject) = VisualMediaEntity(j.getString("id"), j.getString("entryId"), j.getString("kind"),
-        j.getInt("ordinal"), "", j.getString("mime"), j.getLong("byteLength"), j.getString("sha256"), j.getLong("createdAtMs"))
+        j.getInt("ordinal"), "", j.getString("mime"), j.getLong("byteLength"), j.getString("sha256"), j.getLong("createdAtMs"),
+        motionVideoPath = j.optString("motionVideoPath").takeIf { it.isNotEmpty() },
+        motionVideoSha256 = j.optString("motionVideoSha256").takeIf { it.isNotEmpty() },
+        motionVideoByteLength = j.optLong("motionVideoByteLength").takeIf { it > 0 })
     private fun audioJson(a: AudioEntity) = JSONObject().put("id", a.id).put("entryId", a.entryId)
         .put("mime", a.mime).put("byteLength", a.byteLength).put("sha256", a.sha256)
         .put("durationMs", a.durationMs ?: 0)

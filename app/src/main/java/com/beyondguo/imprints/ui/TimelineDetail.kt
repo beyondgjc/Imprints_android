@@ -317,8 +317,12 @@ fun TimelinePage(
                         }
                         details[entry.id]?.let { detail ->
                             if (detail.visuals.isNotEmpty()) MomentsMediaGrid(
-                                detail.visuals.map {
-                                    repository.files.resolve(it.relativePath) to it.kind
+                                detail.visuals.map { v ->
+                                    MediaCell(
+                                        file = repository.files.resolve(v.relativePath),
+                                        kind = v.kind,
+                                        motionVideo = v.motionVideoPath?.let { repository.files.resolve(it) },
+                                    )
                                 },
                                 Modifier.fillMaxWidth().heightIn(max = 420.dp),
                             )
@@ -394,7 +398,13 @@ fun DetailPage(
         if (value.visuals.isNotEmpty()) item {
             // 约束媒体区高度，避免与下方音频/感受重叠
             MomentsMediaGrid(
-                value.visuals.map { repository.files.resolve(it.relativePath) to it.kind },
+                value.visuals.map { v ->
+                    MediaCell(
+                        file = repository.files.resolve(v.relativePath),
+                        kind = v.kind,
+                        motionVideo = v.motionVideoPath?.let { repository.files.resolve(it) },
+                    )
+                },
                 Modifier.fillMaxWidth().heightIn(max = 480.dp)
             )
         }

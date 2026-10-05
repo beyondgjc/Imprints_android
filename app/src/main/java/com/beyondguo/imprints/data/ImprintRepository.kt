@@ -78,8 +78,14 @@ class ImprintRepository(
                         check(choice.value.kind in setOf("IMAGE", "GIF", "VIDEO"))
                         val relativePath = files.commit(choice.value)
                         committedNew += relativePath
+                        choice.value.motionVideoId?.let { mid ->
+                            committedNew += mid
+                        }
                         VisualMediaEntity(choice.value.id, id, choice.value.kind, ordinal, relativePath,
-                            choice.value.mime, choice.value.byteLength, choice.value.sha256, now)
+                            choice.value.mime, choice.value.byteLength, choice.value.sha256, now,
+                            motionVideoPath = choice.value.motionVideoId,
+                            motionVideoSha256 = choice.value.motionVideoSha256,
+                            motionVideoByteLength = choice.value.motionVideoByteLength)
                     }
                 }
             }
@@ -110,8 +116,10 @@ class ImprintRepository(
                 dao.deleteFts(id)
                 if (body.isNotBlank()) dao.insertFts(EntryFtsEntity(entryId = id, body = body))
             }
-            val retained = visuals.map { it.relativePath }.toSet() + listOfNotNull(audio?.relativePath)
-            (oldVisuals.map { it.relativePath } + listOfNotNull(oldAudio?.relativePath))
+            val retained = visuals.flatMap { listOf(it.relativePath) + listOfNotNull(it.motionVideoPath) }.toSet() +
+                listOfNotNull(audio?.relativePath)
+            (oldVisuals.flatMap { listOf(it.relativePath) + listOfNotNull(it.motionVideoPath) } +
+                listOfNotNull(oldAudio?.relativePath))
                 .filter { it !in retained }.forEach { path -> runCatching { files.resolve(path).delete() } }
             old?.placeId?.takeIf { it != place?.id }?.let { oldPlace ->
                 runCatching { dao.deleteUnusedPlace(oldPlace) }
@@ -140,7 +148,8 @@ class ImprintRepository(
 
     private suspend fun deletePermanentlyLocked(id: String) {
         val entry = dao.entry(id) ?: return
-        val paths = dao.visuals(id).map { it.relativePath } + listOfNotNull(dao.audio(id)?.relativePath)
+        val paths = dao.visuals(id).flatMap { listOf(it.relativePath) + listOfNotNull(it.motionVideoPath) } +
+            listOfNotNull(dao.audio(id)?.relativePath)
         database.withTransaction {
             dao.deleteFts(id)
             dao.deleteEntry(id)
@@ -151,7 +160,8 @@ class ImprintRepository(
 
     suspend fun cleanupExpired() = mutation.withLock {
         dao.expired(EntryRules.recycleCutoff(System.currentTimeMillis())).forEach { deletePermanentlyLocked(it.id) }
-        files.cleanup(dao.referencedFiles().toSet())
+        val refs = dao.referencedFiles().toSet() + dao.referencedMotionVideos().toSet()
+        files.cleanup(refs)
     }
 
     suspend fun searchBody(input: String): List<EntryEntity> {
