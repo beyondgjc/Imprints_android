@@ -25,17 +25,14 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
@@ -365,8 +362,16 @@ fun InlineAudio(
                 setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
                 prepare()
             }.also { player = it }
-            if (current.isPlaying) { current.pause(); playing = false }
-            else { PlaybackFocus.started(current); current.play(); playing = true }
+            if (current.isPlaying) {
+                current.pause()
+                playing = false
+            } else {
+                // 播完停在 ENDED，直接 play 不会回到开头
+                if (current.playbackState == Player.STATE_ENDED) current.seekTo(0)
+                PlaybackFocus.started(current)
+                current.play()
+                playing = true
+            }
         }, shape = CircleShape, color = PaleGreen) {
             if (playing) Text("Ⅱ", Modifier.padding(horizontal = 17.dp, vertical = 10.dp),
                 color = Green, fontSize = 18.sp)

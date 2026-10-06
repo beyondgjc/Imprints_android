@@ -1,7 +1,9 @@
 package com.beyondguo.imprints.ui
 
 import android.app.Dialog
+import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
 import androidx.activity.result.PickVisualMediaRequest
@@ -26,24 +28,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -78,7 +74,6 @@ import com.beyondguo.imprints.data.PlaceEntity
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 private data class EditorSnapshot(
@@ -183,6 +178,15 @@ fun EditorPage(
         else prepareUris(uris)
     }
 
+    fun prepareAudio(uri: Uri) {
+        scope.launch {
+            runCatching { repository.files.prepare(uri, audio = true) }.onSuccess { prepared ->
+                (audio as? AudioChoice.New)?.let { repository.files.discard(it.value) }
+                audio = AudioChoice.New(prepared)
+            }.onFailure(report)
+        }
+    }
+
     val multiPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(9)) {
         receivedUris(it)
     }
@@ -190,11 +194,33 @@ fun EditorPage(
         if (uri != null) receivedUris(listOf(uri))
     }
     val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) scope.launch {
-            runCatching { repository.files.prepare(uri, audio = true) }.onSuccess { prepared ->
-                (audio as? AudioChoice.New)?.let { repository.files.discard(it.value) }
-                audio = AudioChoice.New(prepared)
-            }.onFailure(report)
+        if (uri != null) prepareAudio(uri)
+    }
+    var showAudioSourceSheet by remember { mutableStateOf(false) }
+    /** 录音机多不回传 URI，返回后引导到文件选择器挑刚录的那条 */
+    var pendingRecorderReturn by remember { mutableStateOf(false) }
+    val systemRecorderLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val uri = result.data?.data
+        pendingRecorderReturn = false
+        when {
+            uri != null -> prepareAudio(uri)
+            // 无 URI：打开音频文件选择器，用户点刚保存的录音
+            else -> {
+                Toast.makeText(context, "请在列表中选择刚录制的音频", Toast.LENGTH_SHORT).show()
+                audioPicker.launch(arrayOf("audio/*"))
+            }
+        }
+    }
+
+    fun launchSystemRecorder() {
+        // 与 MediaStore.Audio.Media.RECORD_SOUND_ACTION 同值；字符串避免依赖该常量
+        val recordIntent = Intent("android.provider.MediaStore.RECORD_SOUND")
+        if (recordIntent.resolveActivity(context.packageManager) != null) {
+            pendingRecorderReturn = true
+            systemRecorderLauncher.launch(recordIntent)
+        } else {
+            Toast.makeText(context, "未找到录音机，改为从文件选择", Toast.LENGTH_SHORT).show()
+            audioPicker.launch(arrayOf("audio/*"))
         }
     }
 
@@ -296,10 +322,10 @@ fun EditorPage(
             when (val selected = audio) {
                 null -> EditorMetaRow(
                     leadingContent = { Text("♪", color = Quiet, fontSize = 18.sp) },
-                    title = "添加音乐",
+                    title = "添加声音",
                     subtitle = null,
                     titleColor = Quiet,
-                    onClick = { audioPicker.launch(arrayOf("audio/*")) },
+                    onClick = { showAudioSourceSheet = true },
                     trailing = EditorMetaTrailing.Chevron,
                 )
                 is AudioChoice.Existing -> {
@@ -308,7 +334,7 @@ fun EditorPage(
                         file = file,
                         displayName = friendlyAudioName(file.nameWithoutExtension),
                         onRemove = { audio = null },
-                        onReplace = { audioPicker.launch(arrayOf("audio/*")) },
+                        onReplace = { showAudioSourceSheet = true },
                     )
                 }
                 is AudioChoice.New -> EditorAudioSelectedRow(
@@ -318,7 +344,7 @@ fun EditorPage(
                         repository.files.discard(selected.value)
                         audio = null
                     },
-                    onReplace = { audioPicker.launch(arrayOf("audio/*")) },
+                    onReplace = { showAudioSourceSheet = true },
                 )
             }
         }
@@ -413,6 +439,102 @@ fun EditorPage(
             },
             onDismiss = { showEventTimePicker = false },
         )
+    }
+    if (showAudioSourceSheet) {
+        AudioSourceSheet(
+            onPickFile = {
+                showAudioSourceSheet = false
+                audioPicker.launch(arrayOf("audio/*"))
+            },
+            onRecord = {
+                showAudioSourceSheet = false
+                launchSystemRecorder()
+            },
+            onRemove = if (audio != null) {
+                {
+                    showAudioSourceSheet = false
+                    (audio as? AudioChoice.New)?.let { repository.files.discard(it.value) }
+                    audio = null
+                }
+            } else null,
+            onDismiss = { showAudioSourceSheet = false },
+        )
+    }
+}
+
+/** 音频来源：从文件 / 系统录音机（不自建录音 UI） */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun AudioSourceSheet(
+    onPickFile: () -> Unit,
+    onRecord: () -> Unit,
+    onRemove: (() -> Unit)?,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = Color.White,
+        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("添加声音", color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp))
+            Surface(
+                Modifier.fillMaxWidth().clickable(onClick = onPickFile),
+                shape = RoundedCornerShape(14.dp),
+                color = SoftCard,
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text("♫", color = Ink, fontSize = 18.sp)
+                    Column {
+                        Text("从文件选择", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text("铃声、录音、下载目录里的音频", color = Quiet, fontSize = 12.sp)
+                    }
+                }
+            }
+            Surface(
+                Modifier.fillMaxWidth().clickable(onClick = onRecord),
+                shape = RoundedCornerShape(14.dp),
+                color = SoftCard,
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Box(Modifier.size(18.dp).background(Green, RoundedCornerShape(9.dp)))
+                    Column {
+                        Text("系统录音机", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text("打开录音机录一段，保存后选中它", color = Quiet, fontSize = 12.sp)
+                    }
+                }
+            }
+            if (onRemove != null) {
+                Surface(
+                    Modifier.fillMaxWidth().clickable(onClick = onRemove),
+                    shape = RoundedCornerShape(14.dp),
+                    color = SoftCard,
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("移除声音", color = Danger, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+            }
+            TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                Text("取消", color = Quiet, fontSize = 15.sp)
+            }
+        }
     }
 }
 
@@ -537,7 +659,7 @@ private fun EventTimePickerSheet(
                 }) { Text("回到今天", color = Green) }
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = onDismiss) { Text("取消", color = Quiet) }
-                androidx.compose.material3.Button(
+                Button(
                     onClick = { onConfirm(LocalDateTime.of(date, java.time.LocalTime.of(hour, minute))) },
                     shape = RoundedCornerShape(12.dp),
                 ) { Text("确定") }
@@ -771,8 +893,15 @@ private fun EditorAudioSelectedRow(
                     setMediaItem(androidx.media3.common.MediaItem.fromUri(Uri.fromFile(file)))
                     prepare()
                 }.also { player = it }
-                if (current.isPlaying) { current.pause(); playing = false }
-                else { current.play(); playing = true }
+                if (current.isPlaying) {
+                    current.pause()
+                    playing = false
+                } else {
+                    // 播完停在 ENDED，直接 play 不会回到开头
+                    if (current.playbackState == androidx.media3.common.Player.STATE_ENDED) current.seekTo(0)
+                    current.play()
+                    playing = true
+                }
             },
             shape = RoundedCornerShape(10.dp),
             color = PaleGreen,
