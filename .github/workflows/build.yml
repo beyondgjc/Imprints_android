@@ -1,0 +1,105 @@
+name: build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  # 手动触发：改密码学依赖或 Gradle 版本时可用来验证
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: 构建 + 单测
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 检出 印迹
+        uses: actions/checkout@v4
+
+      - name: 检出 penly（加密内核来源）
+        uses: actions/checkout@v4
+        with:
+          repository: beyondgjc/penly
+          # 固定到 tag：crypto-core 是密码学实现，跟随 master 会出现「构建变绿但
+          # 已发布 APK 的备份兼容性已悄悄改变」的假绿。换版本时改这一行。
+          ref: v5.1.0
+          path: penly
+
+      - name: 配置 JDK
+        uses: actions/setup-java@v4
+        with:
+          # AGP 9.x 要求 JDK 17+；本机用 JBR 21，两者均可
+          distribution: temurin
+          java-version: '21'
+
+      - name: 设置 Gradle 缓存
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: 发布 crypto-core 到本地 Maven
+        working-directory: penly
+        run: ./gradlew :crypto-core:publishToMavenLocal --no-daemon
+
+      - name: 构建 + 单元测试
+        run: ./gradlew :app:assembleDebug :app:testDebugUnitTest --no-daemon --stacktrace
+
+      - name: 上传测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: app/build/reports/tests/
+          retention-days: 7
+
+  lint:
+    name: Lint 检查
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: beyondgjc/penly
+          ref: v5.1.0
+          path: penly
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-lint-${{ runner.os }}-${{ hashFiles('**/gradle-wrapper.properties') }}
+          restore-keys: gradle-lint-${{ runner.os }}-
+
+      - name: 发布 crypto-core
+        working-directory: penly
+        run: ./gradlew :crypto-core:publishToMavenLocal --no-daemon
+
+      - name: 运行 lint
+        run: ./gradlew :app:lintDebug --no-daemon
+
+      - name: 上传 lint 报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-debug.html
+          retention-days: 7
