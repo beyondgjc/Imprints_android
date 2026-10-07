@@ -23,8 +23,14 @@ import com.beyondguo.imprints.ui.theme.ImprintsTheme
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 import javax.crypto.Cipher
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 
 class MainActivity : FragmentActivity() {
+    // 隐私门控：为 false 时不创建 database/security/repository（by lazy 保证不被触碰），
+    // 此时 Compose 树里只有同意弹窗，符合「同意前不收集任何个人信息」的要求。
+    private var consentGranted by androidx.compose.runtime.mutableStateOf<Boolean?>(null)
+
     private val database by lazy { ImprintDatabase.get(this) }
     private val security by lazy { ImprintSecurity(database) }
     private val repository by lazy { ImprintRepository(database, MediaFiles(this), security) }
@@ -39,6 +45,8 @@ class MainActivity : FragmentActivity() {
      * 这些跳转会触发 onStop，不能当成「离开应用」而上锁、清感受会话。
      */
     private var externalUiDepth = 0
+    /** 用户已明确「不同意」：再点一次即退出，避免停在无功能可用的空界面上 */
+    private var declinedAt by androidx.compose.runtime.mutableLongStateOf(0L)
 
     override fun startActivityForResult(intent: Intent, requestCode: Int, options: Bundle?) {
         externalUiDepth++
@@ -75,6 +83,72 @@ class MainActivity : FragmentActivity() {
         )
         // 防截屏 + 多任务隐藏：同一开关（FLAG_SECURE），默认开
         com.beyondguo.imprints.privacy.PrivacyPreferences.apply(this)
+
+        // 同意状态只读 SharedPreferences，不触碰 Room/Keystore
+        consentGranted = com.beyondguo.imprints.privacy.ConsentState.isAccepted(this)
+
+        if (consentGranted == true) {
+            startApp()
+        }
+
+        setContent {
+            ImprintsTheme {
+                val granted = consentGranted
+                if (granted != true) {
+                    com.beyondguo.imprints.ui.ConsentDialog(
+                        onAgree = {
+                            com.beyondguo.imprints.privacy.ConsentState.setAccepted(this, true)
+                            consentGranted = true
+                            startApp()
+                        },
+                        onDisagree = {
+                            val now = System.currentTimeMillis()
+                            // 首次点「不同意」不立刻退出：给一次反悔机会，2.5 秒内再点才退出
+                            val last = declinedAt
+                            if (now - last < 2500L) finishAndRemoveTask()
+                            declinedAt = now
+                        },
+                    )
+                } else {
+                    ImprintsApp(
+                        repository = repository,
+                        initialized = initialized.value,
+                        locked = appLocked.value,
+                        revealEpoch = revealEpoch.intValue,
+                        unlockApp = { pin ->
+                            val ok = security.verifyAppLock(pin)
+                            if (ok) appLocked.value = false
+                            ok
+                        },
+                        refreshLockState = {
+                            lockEnabled = security.state().appLockHeaderJson != null
+                            if (lockEnabled) {
+                                security.clearFeelingSession()
+                                revealEpoch.intValue++
+                            }
+                            appLocked.value = lockEnabled
+                        },
+                        requestBiometric = { target, onSuccess, onUnavailable ->
+                            promptBiometric(target, onSuccess, onUnavailable)
+                        },
+                        onPrivacyFlagsChanged = {
+                            com.beyondguo.imprints.privacy.PrivacyPreferences.apply(this)
+                        },
+                        onRevokeConsent = {
+                            com.beyondguo.imprints.privacy.ConsentState.setAccepted(this, false)
+                            consentGranted = false
+                            declinedAt = 0L
+                            // 撤回后直接退出：留着应用锁页面会让用户困在协议页里出不来
+                            finishAndRemoveTask()
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    /** 仅在已同意后调用：初始化数据库相关状态与后台清理任务。 */
+    private fun startApp() {
         lifecycleScope.launch {
             lockEnabled = security.state().appLockHeaderJson != null
             appLocked.value = lockEnabled
@@ -84,35 +158,6 @@ class MainActivity : FragmentActivity() {
             "imprints-cleanup", ExistingPeriodicWorkPolicy.KEEP,
             PeriodicWorkRequestBuilder<com.beyondguo.imprints.data.CleanupWorker>(1, TimeUnit.DAYS).build(),
         )
-        setContent {
-            ImprintsTheme {
-                ImprintsApp(
-                    repository = repository,
-                    initialized = initialized.value,
-                    locked = appLocked.value,
-                    revealEpoch = revealEpoch.intValue,
-                    unlockApp = { pin ->
-                        val ok = security.verifyAppLock(pin)
-                        if (ok) appLocked.value = false
-                        ok
-                    },
-                    refreshLockState = {
-                        lockEnabled = security.state().appLockHeaderJson != null
-                        if (lockEnabled) {
-                            security.clearFeelingSession()
-                            revealEpoch.intValue++
-                        }
-                        appLocked.value = lockEnabled
-                    },
-                    requestBiometric = { target, onSuccess, onUnavailable ->
-                        promptBiometric(target, onSuccess, onUnavailable)
-                    },
-                    onPrivacyFlagsChanged = {
-                        com.beyondguo.imprints.privacy.PrivacyPreferences.apply(this)
-                    },
-                )
-            }
-        }
     }
 
     override fun onResume() {
@@ -122,6 +167,8 @@ class MainActivity : FragmentActivity() {
 
     override fun onStart() {
         super.onStart()
+        // 同意前不碰数据库：repository/database 是 by lazy，访问即建库
+        if (consentGranted != true) return
         lifecycleScope.launch {
             runCatching { repository.cleanupExpired() }
             runCatching { BackupService(this@MainActivity, database, repository).cleanupInterruptedImports() }
@@ -137,6 +184,8 @@ class MainActivity : FragmentActivity() {
             android.util.Log.i("ImprintsLock", "onStop skip lock (externalUi depth=$externalUiDepth)")
             return
         }
+        // 同意前无会话可清，也无锁可上
+        if (consentGranted != true) return
         // 指纹系统弹窗可能触发 onStop；此刻清会话会导致「刚输完口令开指纹却注册失败」
         if (!biometricPromptActive) {
             security.clearFeelingSession()

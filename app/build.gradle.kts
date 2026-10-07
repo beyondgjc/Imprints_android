@@ -77,6 +77,12 @@ android {
     buildFeatures {
         compose = true
     }
+    // 上架前自检：release 构建必须过 lint（缺权限说明/硬编码文案等问题会直接报）
+    lint {
+        abortOnError = true
+        checkReleaseBuilds = true
+        warningsAsErrors = false
+    }
 }
 
 ksp {

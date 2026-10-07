@@ -73,6 +73,8 @@ private sealed interface Page {
     data object Settings : Page
     data object Recycle : Page
     data object Search : Page
+    data object PrivacyPolicy : Page
+    data object UserAgreement : Page
     data class Detail(val id: String) : Page
     data class Editor(val id: String?) : Page
     data class LocationDetail(val place: com.beyondguo.imprints.data.PlaceEntity) : Page
@@ -90,6 +92,7 @@ fun ImprintsApp(
     refreshLockState: suspend () -> Unit,
     requestBiometric: (String, () -> Unit, () -> Unit) -> Unit,
     onPrivacyFlagsChanged: () -> Unit = {},
+    onRevokeConsent: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
@@ -192,6 +195,7 @@ fun ImprintsApp(
     BackHandler(page != Page.Timeline && !locked) {
         page = when (page) {
             is Page.RecycleDetail -> Page.Recycle
+            is Page.PrivacyPolicy, is Page.UserAgreement -> Page.Settings
             else -> Page.Timeline
         }
     }
@@ -206,10 +210,13 @@ fun ImprintsApp(
                     is Page.RecycleDetail -> "回收站详情"
                     is Page.Editor -> if ((page as Page.Editor).id == null) "新建印迹" else "编辑印迹"
                     is Page.LocationDetail -> "位置详情"
+                    Page.PrivacyPolicy -> "隐私政策"
+                    Page.UserAgreement -> "用户协议"
                 }, color = Ink, fontWeight = FontWeight.Bold, fontSize = 20.sp) },
                 navigationIcon = { IconButton(onClick = {
                     page = when (page) {
                         is Page.RecycleDetail -> Page.Recycle
+                        is Page.PrivacyPolicy, is Page.UserAgreement -> Page.Settings
                         else -> Page.Timeline
                     }
                 }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = Ink) } },
@@ -303,7 +310,12 @@ fun ImprintsApp(
                     onImport = { openBackup.launch(arrayOf("*/*")) },
                     onLockNow = { scope.launch { refreshLockState() } },
                     onPrivacyFlagsChanged = onPrivacyFlagsChanged,
+                    onOpenPrivacyPolicy = { page = Page.PrivacyPolicy },
+                    onOpenUserAgreement = { page = Page.UserAgreement },
+                    onRevokeConsent = onRevokeConsent,
                 )
+                Page.PrivacyPolicy -> PolicyDocumentPage("隐私政策", "privacy_policy.txt") { page = Page.Settings }
+                Page.UserAgreement -> PolicyDocumentPage("用户协议", "user_agreement.txt") { page = Page.Settings }
                 Page.Recycle -> RecyclePage(recycled,
                     onOpen = { page = Page.RecycleDetail(it) },
                     onRestore = { id ->
@@ -617,11 +629,15 @@ private fun SettingsPage(
     onLockNow: () -> Unit,
     onExport: () -> Unit, onImport: () -> Unit,
     onPrivacyFlagsChanged: () -> Unit = {},
+    onOpenPrivacyPolicy: () -> Unit = {},
+    onOpenUserAgreement: () -> Unit = {},
+    onRevokeConsent: () -> Unit = {},
 ) {
     val context = LocalContext.current
     var secureWindow by remember {
         mutableStateOf(com.beyondguo.imprints.privacy.PrivacyPreferences.isEnabled(context))
     }
+    var confirmRevoke by remember { mutableStateOf(false) }
     // 关于：仅展示当前版本（不做检查更新——仓库私有，应用内拉不到版本信息）
     val versionName = remember(context) {
         runCatching {
@@ -727,6 +743,25 @@ private fun SettingsPage(
                     title = "版本",
                     trailing = { Text("v$versionName", color = Quiet, fontSize = 13.sp) },
                 )
+                FineDivider()
+                SettingsRow(
+                    title = "隐私政策",
+                    subtitle = "数据如何存储与保护",
+                    onClick = onOpenPrivacyPolicy,
+                )
+                FineDivider()
+                SettingsRow(
+                    title = "用户协议",
+                    subtitle = "使用规则与责任范围",
+                    onClick = onOpenUserAgreement,
+                )
+                FineDivider()
+                SettingsRow(
+                    title = "撤回同意",
+                    subtitle = "撤回后应用将退出，本机数据保留",
+                    danger = true,
+                    onClick = { confirmRevoke = true },
+                )
             }
         }
 
@@ -740,6 +775,32 @@ private fun SettingsPage(
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
         }
+    }
+
+    if (confirmRevoke) {
+        AlertDialog(
+            onDismissRequest = { confirmRevoke = false },
+            title = { Text("撤回隐私政策同意", color = Ink) },
+            text = {
+                Text(
+                    "撤回后将退出应用，下次启动需重新同意。\n\n" +
+                        "你的印迹不会被删除，仍然完整保留在本机。",
+                    color = Ink, fontSize = 14.sp, lineHeight = 21.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { confirmRevoke = false; onRevokeConsent() }) {
+                    Text("确认撤回", color = Danger, fontSize = 15.sp)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRevoke = false }) {
+                    Text("取消", color = Quiet, fontSize = 15.sp)
+                }
+            },
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
+            containerColor = Color.White,
+        )
     }
 }
 
