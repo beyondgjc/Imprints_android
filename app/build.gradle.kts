@@ -113,8 +113,7 @@ dependencies {
     // registry 的高位随机 requestCode 冲突，选图/音频/权限 launch 必现 crash。
     // 与 Penly 一致钉 fragment-ktx 1.9.0（1.3.0+ 已移除该校验）。
     implementation(libs.androidx.fragment.ktx)
-    implementation(libs.amap.search)
-    implementation(libs.amap.map)
+    implementation(libs.amap.combo)
     implementation("com.beyondguo.penly:crypto-core:0.1.0")
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))

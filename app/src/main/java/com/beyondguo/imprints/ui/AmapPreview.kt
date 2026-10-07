@@ -10,6 +10,7 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.amap.api.maps.CameraUpdateFactory
 import com.amap.api.maps.MapView
 import com.amap.api.maps.model.BitmapDescriptorFactory
@@ -18,7 +19,8 @@ import com.amap.api.maps.model.MarkerOptions
 
 /**
  * 高德地图预览：单点标注 + 手势缩放/平移。
- * 坐标须为 GCJ-02（与高德底图一致）；生命周期跟随页面 resume/pause/destroy。
+ * 依赖 3dmap-location-search ≥11.2.000（MAP so 为 16KB 对齐）。
+ * 坐标须为 GCJ-02；生命周期跟随页面 resume/pause/destroy。
  */
 @Composable
 fun AmapPreview(
@@ -28,7 +30,7 @@ fun AmapPreview(
     zoom: Float = 16f,
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     val target = remember(gcjLat, gcjLng) { LatLng(gcjLat, gcjLng) }
 
     val mapView = remember {
@@ -65,7 +67,6 @@ fun AmapPreview(
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        // 已处于 RESUMED 时补一次（AndroidView 创建晚于 Activity onResume）
         if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
             mapView.onResume()
         }

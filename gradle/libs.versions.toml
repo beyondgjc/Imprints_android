@@ -19,10 +19,9 @@ work = "2.11.1"
 # 与 Penly 一致：钉 stable 1.9.0 + fragment-ktx。
 biometric = "1.1.0"
 fragmentKtx = "1.9.0"
-# 高德搜索（POI 关键字/周边）
-amapSearch = "9.7.1"
-# 高德 3D 地图（位置详情预览，支持缩放）；与 search 同大版本线
-amapMap = "9.7.0"
+# 高德：3dmap 单独坐标至 10.0.600 的 MAP so 仍为 4KB；
+# 16KB 对齐的 Map（含 MapView + Search）从 3dmap-location-search 11.2.000 起提供。
+amapCombo = "11.3.100_loc11.3.000_sea9.8.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -50,8 +49,8 @@ androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx"
 androidx-biometric = { group = "androidx.biometric", name = "biometric", version.ref = "biometric" }
 # 显式升级 fragment ≥1.3.0：见 [versions] fragmentKtx 注释
 androidx-fragment-ktx = { group = "androidx.fragment", name = "fragment-ktx", version.ref = "fragmentKtx" }
-amap-search = { group = "com.amap.api", name = "search", version.ref = "amapSearch" }
-amap-map = { group = "com.amap.api", name = "3dmap", version.ref = "amapMap" }
+# Map + Search + Location 聚合坐标（MAP so 自 11.2.000 起 16KB 对齐）
+amap-combo = { group = "com.amap.api", name = "3dmap-location-search", version.ref = "amapCombo" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
