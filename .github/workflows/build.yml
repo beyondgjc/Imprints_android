@@ -20,10 +20,10 @@ jobs:
 
     steps:
       - name: 检出 印迹
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: 检出 penly（加密内核来源）
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: beyondgjc/penly
           # 固定到 tag：crypto-core 是密码学实现，跟随 master 会出现「构建变绿但
@@ -41,7 +41,7 @@ jobs:
           java-version: '21'
 
       - name: 设置 Gradle 缓存
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.gradle/caches
@@ -62,7 +62,7 @@ jobs:
 
       - name: 上传测试报告
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: test-reports
           path: app/build/reports/tests/
@@ -74,9 +74,9 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: beyondgjc/penly
           ref: v5.1.1
@@ -87,7 +87,7 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.gradle/caches
@@ -104,7 +104,7 @@ jobs:
 
       - name: 上传 lint 报告
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: lint-report
           path: app/build/reports/lint-results-debug.html
