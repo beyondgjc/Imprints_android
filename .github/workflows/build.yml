@@ -49,10 +49,14 @@ jobs:
 
       - name: 发布 crypto-core 到本地 Maven
         working-directory: penly
-        run: ./gradlew :crypto-core:publishToMavenLocal --no-daemon
+        # 两个仓库的 gradlew 在 git 里都是 100644（Windows 开发，Git 未记录可执行位），
+        # clone 到 Linux 后直接 ./gradlew 会报 "Permission denied"(exit 126)。
+        # 用 sh 显式调用可绕过权限位；gradle-wrapper.jar 本身不需要可执行。
+        run: sh ./gradlew :crypto-core:publishToMavenLocal --no-daemon
 
       - name: 构建 + 单元测试
-        run: ./gradlew :app:assembleDebug :app:testDebugUnitTest --no-daemon --stacktrace
+        # 同上：gradlew 权限位为 100644，用 sh 调用绕过
+        run: sh ./gradlew :app:assembleDebug :app:testDebugUnitTest --no-daemon --stacktrace
 
       - name: 上传测试报告
         if: always()
@@ -91,10 +95,10 @@ jobs:
 
       - name: 发布 crypto-core
         working-directory: penly
-        run: ./gradlew :crypto-core:publishToMavenLocal --no-daemon
+        run: sh ./gradlew :crypto-core:publishToMavenLocal --no-daemon
 
       - name: 运行 lint
-        run: ./gradlew :app:lintDebug --no-daemon
+        run: sh ./gradlew :app:lintDebug --no-daemon
 
       - name: 上传 lint 报告
         if: always()
