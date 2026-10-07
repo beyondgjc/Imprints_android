@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -83,6 +84,8 @@ fun LocationPickerPage(
     var cityLabel by remember { mutableStateOf("") }
     var lastWgs by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var searchJob by remember { mutableStateOf<Job?>(null) }
+    // 仅在「永久拒绝定位」后才为 true；首次进入不弹任何弹窗
+    var showOpenSettings by remember { mutableStateOf(false) }
 
     BackHandler { onBack() }
 
@@ -113,6 +116,7 @@ fun LocationPickerPage(
     val hintNotGranted = stringResource(R.string.location_not_granted)
     val hintTapAllow = stringResource(R.string.location_tap_allow)
     val hintTapAllowShort = stringResource(R.string.location_tap_allow_short)
+    val hintNeedSettings = stringResource(R.string.location_need_settings)
 
     suspend fun loadNearby() {
         nearbyLoading = true
@@ -157,9 +161,40 @@ fun LocationPickerPage(
             grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (ok) {
             scope.launch { loadNearby() }
-        } else {
-            nearbyHint = hintNotGranted
+            return@rememberLauncherForActivityResult
         }
+        // 被拒。此时判断是否"永久拒绝"：官方文档明确 —— 用户勾了"不再询问"后，
+        // 系统不会再弹对话框，而是**立即以拒绝结果回调**（用户没做任何交互）。
+        // 所以在回调里判断正是唯一可靠的时机；此时两个 rationale 都为 false。
+        // 注意首次申请时 rationale 也为 false，但那次系统框会正常弹出，走不到这里。
+        //
+        // shouldShowRequestPermissionRationale 只存在于 Activity（javap 核实：
+        // android.content.Context / ContextWrapper 均无此方法），所以必须拿 Activity
+        // 来调，不能用 LocalContext —— 否则运行时会 NoSuchMethodError。
+        // LocalContext 在 Activity 里通常是 ContextWrapper(Activity)，取 Activity 来调
+        // Activity 专属的 API；取不到（极端情况）时按不可再问处理，弹设置引导更安全。
+        val activity = context.findActivity()
+        val canAskAgain = activity != null &&
+            (activity.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION) ||
+                activity.shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_COARSE_LOCATION))
+        if (canAskAgain) {
+            nearbyHint = hintNotGranted
+        } else {
+            nearbyHint = hintNeedSettings
+            showOpenSettings = true
+        }
+    }
+
+    // 每次点击都拉系统权限框：用户主动点击即表达了意图，这是标准做法。
+    // 若已被永久拒绝，系统框不会再出现，这次点击就是"点了没反应"，
+    // 用户再点引导按钮时才会看到设置弹窗——不预先打扰。
+    fun requestLocation() {
+        permissionLauncher.launch(
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+            )
+        )
     }
 
     // 进入页面：已有权限则自动拉附近；否则引导授权（微信式，不静默弹窗）
@@ -171,6 +206,7 @@ fun LocationPickerPage(
         if (fine || coarse) {
             loadNearby()
         } else {
+            // 首次进入不弹任何弹窗，只给一行可点的引导；用户主动点了才有下一步
             nearbyHint = hintTapAllow
         }
     }
@@ -322,24 +358,27 @@ fun LocationPickerPage(
                     }
                 }
 
-                // 未授权 → 引导
-                if (nearbyHint.startsWith(hintTapAllowShort)) {
+                // 未授权 → 引导（首次/普通拒绝走系统框，永久拒绝走设置引导）
+                if (nearbyHint.startsWith(hintTapAllowShort) || nearbyHint == hintNeedSettings) {
+                    val permanentlyDenied = nearbyHint == hintNeedSettings
                     item {
                         TextButton(
-                            onClick = {
-                                permissionLauncher.launch(
-                                    arrayOf(
-                                        Manifest.permission.ACCESS_FINE_LOCATION,
-                                        Manifest.permission.ACCESS_COARSE_LOCATION,
-                                    )
-                                )
-                            },
+                            onClick = { requestLocation() },
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                         ) {
-                            Text(stringResource(R.string.location_grant), color = Green, fontSize = 15.sp)
+                            Text(
+                                stringResource(
+                                    if (permanentlyDenied) R.string.location_open_settings
+                                    else R.string.location_grant
+                                ),
+                                color = Green, fontSize = 15.sp,
+                            )
                         }
                         Text(
-                            stringResource(R.string.location_grant_sub),
+                            stringResource(
+                                if (permanentlyDenied) R.string.location_need_settings_sub
+                                else R.string.location_grant_sub
+                            ),
                             Modifier.padding(horizontal = 20.dp),
                             color = Quiet,
                             fontSize = 12.sp,
@@ -401,6 +440,23 @@ fun LocationPickerPage(
             }
         }
     }
+
+    // 仅在「永久拒绝定位」后弹出；首次进入与普通拒绝都不打扰
+    if (showOpenSettings) {
+        LocationSettingsDialog(
+            onOpenSettings = {
+                showOpenSettings = false
+                openAppSettings(context)
+            },
+            onSearchInstead = {
+                showOpenSettings = false
+                // 不锁死功能：直接切到搜索模式，用户照样能选地点
+                searchMode = true
+                query = ""
+            },
+            onDismiss = { showOpenSettings = false },
+        )
+    }
 }
 
 @Composable
@@ -433,4 +489,61 @@ private fun PoiRow(item: PoiResultItem, selected: Boolean, onClick: () -> Unit) 
             Icon(Icons.Default.CheckCircle, null, tint = Green, modifier = Modifier.size(20.dp))
         }
     }
+}
+
+/**
+ * 永久拒绝定位后的引导弹窗。
+ *
+ * 只在用户已明确表达过意图（点过"允许定位"）且系统框不再出现时才出现，
+ * 引导到系统设置；用户也可选择"用搜索就好"，不把功能锁死。
+ */
+@Composable
+private fun LocationSettingsDialog(
+    onOpenSettings: () -> Unit,
+    onSearchInstead: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.perm_settings_title), color = Ink, fontSize = 18.sp) },
+        text = { Text(stringResource(R.string.perm_settings_message), color = Ink, fontSize = 14.sp, lineHeight = 22.sp) },
+        confirmButton = {
+            TextButton(onClick = onOpenSettings) {
+                Text(stringResource(R.string.perm_settings_confirm), color = Green, fontSize = 15.sp)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onSearchInstead) {
+                Text(stringResource(R.string.perm_settings_cancel), color = Quiet, fontSize = 15.sp)
+            }
+        },
+        shape = RoundedCornerShape(22.dp),
+        containerColor = Color.White,
+    )
+}
+
+/** 打开本应用的系统设置页（ACTION_APPLICATION_DETAILS_SETTINGS）。 */
+fun openAppSettings(context: android.content.Context) {
+    runCatching {
+        context.startActivity(
+            android.content.Intent(
+                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                android.net.Uri.fromParts("package", context.packageName, null),
+            ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        )
+    }
+}
+
+/**
+ * 从任意 Context 逐层解包出 Activity。
+ * LocalContext.current 通常是 ContextThemeWrapper(ContextWrapper(Activity))，
+ * 但层级不保证，故用循环而非一次强转；取不到返回 null。
+ */
+private fun android.content.Context.findActivity(): android.app.Activity? {
+    var current = this
+    while (current is android.content.ContextWrapper) {
+        if (current is android.app.Activity) return current
+        current = current.baseContext
+    }
+    return null
 }

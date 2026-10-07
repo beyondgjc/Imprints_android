@@ -265,4 +265,11 @@
     <string name="consent_link_and">与</string>
     <string name="consent_link_privacy">《隐私政策》</string>
     <string name="consent_link_agreement">《用户协议》</string>
+    <string name="location_need_settings">位置权限已被永久关闭</string>
+    <string name="location_open_settings">前往系统设置开启</string>
+    <string name="location_need_settings_sub">开启后才能查看附近地点，也可以直接搜索</string>
+    <string name="perm_settings_title">需要位置权限</string>
+    <string name="perm_settings_message">印迹用位置帮你找到当前附近的地点。\n\n不会在后台定位，不会上传你的位置；你也可以选择直接搜索地点。</string>
+    <string name="perm_settings_confirm">去设置</string>
+    <string name="perm_settings_cancel">用搜索就好</string>
 </resources>
