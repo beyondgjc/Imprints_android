@@ -64,14 +64,21 @@ fun LocationDetailPage(
     ) {
         item { Spacer(Modifier.height(4.dp)) }
         item {
-            // 静意地图占位（无 Key 时不嵌在线地图，可点击交给外部地图）
+            // 有坐标：嵌高德真地图（可缩放平移）；无坐标：静态示意 + 点按交给外部地图
+            val latLng = if (place.latitude != null && place.longitude != null) {
+                if (place.coordinateSystem.equals("GCJ-02", ignoreCase = true)) {
+                    place.latitude!! to place.longitude!!
+                } else {
+                    Wgs84GCJ02.toGcj02(place.latitude!!, place.longitude!!)
+                }
+            } else null
             Box(
                 Modifier
                     .fillMaxWidth()
                     .height(260.dp)
                     .clip(RoundedCornerShape(14.dp))
                     .background(Color(0xFFF0F3F1))
-                    .clickable(enabled = coordinates != null) {
+                    .clickable(enabled = latLng == null && coordinates != null) {
                         runCatching {
                             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=$coordinates")))
                         }.onFailure {
@@ -80,23 +87,31 @@ fun LocationDetailPage(
                     },
                 contentAlignment = Alignment.Center,
             ) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val road = Color(0xFFDFE5DF)
-                    drawLine(road, Offset(0f, size.height * 0.35f), Offset(size.width, size.height * 0.28f), 18.dp.toPx(), StrokeCap.Round)
-                    drawLine(road, Offset(0f, size.height * 0.72f), Offset(size.width, size.height * 0.65f), 18.dp.toPx(), StrokeCap.Round)
-                    drawLine(Color.White, Offset(size.width * 0.28f, 0f), Offset(size.width * 0.28f, size.height), 7.dp.toPx())
-                    drawLine(Color.White, Offset(size.width * 0.72f, 0f), Offset(size.width * 0.72f, size.height), 7.dp.toPx())
-                    drawLine(Color.White, Offset(0f, size.height * 0.5f), Offset(size.width, size.height * 0.5f), 7.dp.toPx())
-                    val pin = Offset(size.width / 2f, size.height / 2f)
-                    drawCircle(Green.copy(alpha = 0.14f), 30.dp.toPx(), pin)
-                    drawCircle(Green, 8.dp.toPx(), pin)
+                if (latLng != null) {
+                    AmapPreview(
+                        gcjLat = latLng.first,
+                        gcjLng = latLng.second,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    Canvas(Modifier.fillMaxSize()) {
+                        val road = Color(0xFFDFE5DF)
+                        drawLine(road, Offset(0f, size.height * 0.35f), Offset(size.width, size.height * 0.28f), 18.dp.toPx(), StrokeCap.Round)
+                        drawLine(road, Offset(0f, size.height * 0.72f), Offset(size.width, size.height * 0.65f), 18.dp.toPx(), StrokeCap.Round)
+                        drawLine(Color.White, Offset(size.width * 0.28f, 0f), Offset(size.width * 0.28f, size.height), 7.dp.toPx())
+                        drawLine(Color.White, Offset(size.width * 0.72f, 0f), Offset(size.width * 0.72f, size.height), 7.dp.toPx())
+                        drawLine(Color.White, Offset(0f, size.height * 0.5f), Offset(size.width, size.height * 0.5f), 7.dp.toPx())
+                        val pin = Offset(size.width / 2f, size.height / 2f)
+                        drawCircle(Green.copy(alpha = 0.14f), 30.dp.toPx(), pin)
+                        drawCircle(Green, 8.dp.toPx(), pin)
+                    }
+                    Icon(
+                        Icons.Default.LocationOn,
+                        null,
+                        tint = Green,
+                        modifier = Modifier.size(32.dp),
+                    )
                 }
-                Icon(
-                    Icons.Default.LocationOn,
-                    null,
-                    tint = Green,
-                    modifier = Modifier.size(32.dp),
-                )
             }
         }
         item {

@@ -19,8 +19,10 @@ work = "2.11.1"
 # 与 Penly 一致：钉 stable 1.9.0 + fragment-ktx。
 biometric = "1.1.0"
 fragmentKtx = "1.9.0"
-# 高德搜索（POI 关键字/周边）；地图预览不嵌入，仅外部 geo:/URI 导航
+# 高德搜索（POI 关键字/周边）
 amapSearch = "9.7.1"
+# 高德 3D 地图（位置详情预览，支持缩放）；与 search 同大版本线
+amapMap = "9.7.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -49,6 +51,7 @@ androidx-biometric = { group = "androidx.biometric", name = "biometric", version
 # 显式升级 fragment ≥1.3.0：见 [versions] fragmentKtx 注释
 androidx-fragment-ktx = { group = "androidx.fragment", name = "fragment-ktx", version.ref = "fragmentKtx" }
 amap-search = { group = "com.amap.api", name = "search", version.ref = "amapSearch" }
+amap-map = { group = "com.amap.api", name = "3dmap", version.ref = "amapMap" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
