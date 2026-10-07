@@ -75,6 +75,8 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.util.UUID
+import com.beyondguo.imprints.R
+import androidx.compose.ui.res.stringResource
 
 private data class EditorSnapshot(
     val body: String, val feeling: String, val eventTime: String, val placeName: String,
@@ -118,6 +120,14 @@ fun EditorPage(
     var exitRequested by remember(id) { mutableStateOf(false) }
     var showEventTimePicker by remember(id) { mutableStateOf(false) }
 
+    // 这些文案在 LaunchedEffect / Toast 等非 Composable 回调里被引用，
+    // 那里不能调 stringResource，所以在入口先取成局部 val 闭包捕获。
+    val errEntryMissing = stringResource(R.string.err_entry_missing)
+    val errTooManyMedia = stringResource(R.string.err_too_many_media)
+    val errTooManyMediaPick = stringResource(R.string.err_too_many_media_pick)
+    val errPickRecordedAudio = stringResource(R.string.err_pick_recorded_audio)
+    val errNoRecorder = stringResource(R.string.err_no_recorder)
+
     fun snapshot() = EditorSnapshot(body, feeling, eventTime, placeName, selectedPlace,
         visuals.map { when (it) { is MediaChoice.Existing -> it.value.id; is MediaChoice.New -> it.value.id } },
         when (val selected = audio) { is AudioChoice.Existing -> selected.value.id; is AudioChoice.New -> selected.value.id; null -> null })
@@ -139,7 +149,7 @@ fun EditorPage(
             if (initial == null) initial = snapshot()
         } else {
             val detail = repository.detail(id)
-            if (detail == null) { loading = false; report(IllegalStateException("印迹已不存在")); return@LaunchedEffect }
+            if (detail == null) { loading = false; report(IllegalStateException(errEntryMissing)); return@LaunchedEffect }
             if (!loaded) {
                 body = detail.entry.body
                 eventTime = detail.entry.eventLocalMinute
@@ -166,7 +176,7 @@ fun EditorPage(
                 runCatching { repository.files.prepare(uri) }
                     .onSuccess { prepared ->
                         if (visuals.size < 9) visuals.add(MediaChoice.New(prepared))
-                        else { repository.files.discard(prepared); report(IllegalStateException("图片、动图、视频最多 9 个")) }
+                        else { repository.files.discard(prepared); report(IllegalStateException(errTooManyMedia)) }
                     }.onFailure(report)
             }
         }
@@ -206,7 +216,7 @@ fun EditorPage(
             uri != null -> prepareAudio(uri)
             // 无 URI：打开音频文件选择器，用户点刚保存的录音
             else -> {
-                Toast.makeText(context, "请在列表中选择刚录制的音频", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, errPickRecordedAudio, Toast.LENGTH_SHORT).show()
                 audioPicker.launch(arrayOf("audio/*"))
             }
         }
@@ -219,23 +229,23 @@ fun EditorPage(
             pendingRecorderReturn = true
             systemRecorderLauncher.launch(recordIntent)
         } else {
-            Toast.makeText(context, "未找到录音机，改为从文件选择", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, errNoRecorder, Toast.LENGTH_SHORT).show()
             audioPicker.launch(arrayOf("audio/*"))
         }
     }
 
-    if (loading) { Text("正在加载…", Modifier.padding(20.dp)); return }
+    if (loading) { Text(stringResource(R.string.state_loading), Modifier.padding(20.dp)); return }
     if (blocked) {
         Column(Modifier.padding(20.dp)) {
-            Text("请先解锁感受，再编辑这条印迹。")
-            Button(onClick = onUnlock) { Text("输入感受口令") }
-            TextButton(onClick = ::requestExit) { Text("取消") }
+            Text(stringResource(R.string.editor_unlock_feeling_first))
+            Button(onClick = onUnlock) { Text(stringResource(R.string.editor_input_feeling_pin)) }
+            TextButton(onClick = ::requestExit) { Text(stringResource(R.string.action_cancel)) }
         }
         if (exitRequested && !LocalImprintsLocked.current) AlertDialog(onDismissRequest = { exitRequested = false },
-            title = { Text("有内容尚未保存") },
-            text = { Text("离开后，本次未保存的修改\n将不会保留。") },
-            confirmButton = { TextButton(onClick = { exitRequested = false; discardPending(); onCancel() }) { Text("放弃修改") } },
-            dismissButton = { TextButton(onClick = { exitRequested = false }) { Text("继续编辑") } })
+            title = { Text(stringResource(R.string.editor_unsaved_title)) },
+            text = { Text(stringResource(R.string.editor_unsaved_message)) },
+            confirmButton = { TextButton(onClick = { exitRequested = false; discardPending(); onCancel() }) { Text(stringResource(R.string.editor_discard)) } },
+            dismissButton = { TextButton(onClick = { exitRequested = false }) { Text(stringResource(R.string.editor_keep_editing)) } })
         return
     }
 
@@ -264,24 +274,24 @@ fun EditorPage(
             report = report,
         )
         if (exitRequested && !LocalImprintsLocked.current) AlertDialog(onDismissRequest = { exitRequested = false },
-            title = { Text("有内容尚未保存") },
-            text = { Text("离开后，本次未保存的修改\n将不会保留。") },
-            confirmButton = { TextButton(onClick = { exitRequested = false; discardPending(); onCancel() }) { Text("放弃修改") } },
-            dismissButton = { TextButton(onClick = { exitRequested = false }) { Text("继续编辑") } })
+            title = { Text(stringResource(R.string.editor_unsaved_title)) },
+            text = { Text(stringResource(R.string.editor_unsaved_message)) },
+            confirmButton = { TextButton(onClick = { exitRequested = false; discardPending(); onCancel() }) { Text(stringResource(R.string.editor_discard)) } },
+            dismissButton = { TextButton(onClick = { exitRequested = false }) { Text(stringResource(R.string.editor_keep_editing)) } })
         return
     }
 
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
             TextButton(onClick = ::requestExit, modifier = Modifier.align(Alignment.CenterStart)) {
-                Text("取消", color = Ink, fontSize = 16.sp)
+                Text(stringResource(R.string.action_cancel), color = Ink, fontSize = 16.sp)
             }
-            Text(if (id == null) "新建印迹" else "编辑印迹", Modifier.align(Alignment.Center),
+            Text(if (id == null) stringResource(R.string.editor_new_title) else stringResource(R.string.editor_edit_title), Modifier.align(Alignment.Center),
                 color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Button(onClick = ::saveEntry, enabled = !saving && EntryRules.canSave(body, visuals.size,
                 feelingLocked && feeling.isNotBlank()), shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.align(Alignment.CenterEnd)) {
-                Text(if (saving) "保存中" else "保存")
+                Text(if (saving) stringResource(R.string.state_saving) else stringResource(R.string.action_save))
             }
         }
     LazyColumn(
@@ -294,7 +304,7 @@ fun EditorPage(
         contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp),
     ) {
         // 正文 → 图片/媒体 → 音频 → 位置 → 事件时间 → 感受
-        item { TextField(body, { body = it }, placeholder = { Text("发生了什么值得记住的事？", color = Quiet) },
+        item { TextField(body, { body = it }, placeholder = { Text(stringResource(R.string.editor_body_hint), color = Quiet) },
             modifier = Modifier.fillMaxWidth(), minLines = 5, textStyle = androidx.compose.ui.text.TextStyle(fontSize = 18.sp, lineHeight = 29.sp, color = Ink),
             colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent,
                 unfocusedContainerColor = Color.Transparent, focusedIndicatorColor = Color.Transparent,
@@ -306,7 +316,7 @@ fun EditorPage(
                 repository = repository,
                 onAdd = {
                     when (EntryRules.MAX_VISUALS - visuals.size) {
-                        0 -> report(IllegalStateException("最多可添加 9 张图片、动图或视频"))
+                        0 -> report(IllegalStateException(errTooManyMediaPick))
                         1 -> singlePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
                         else -> multiPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
                     }
@@ -322,7 +332,7 @@ fun EditorPage(
             when (val selected = audio) {
                 null -> EditorMetaRow(
                     leadingContent = { Text("♪", color = Quiet, fontSize = 18.sp) },
-                    title = "添加声音",
+                    title = stringResource(R.string.editor_audio_title),
                     subtitle = null,
                     titleColor = Quiet,
                     onClick = { showAudioSourceSheet = true },
@@ -358,8 +368,8 @@ fun EditorPage(
                         Icon(Icons.Default.LocationOn, null, tint = Color.White, modifier = Modifier.size(20.dp))
                     },
                     leadingTint = Green,
-                    title = placeTitle!!,
-                    subtitle = selectedPlace?.address?.takeIf { it.isNotBlank() } ?: "点按更换位置",
+                    title = placeTitle,
+                    subtitle = selectedPlace?.address?.takeIf { it.isNotBlank() } ?: stringResource(R.string.editor_tap_change_place),
                     titleColor = Green,
                     onClick = { showLocationPicker = true },
                     trailing = EditorMetaTrailing.Clear,
@@ -373,7 +383,7 @@ fun EditorPage(
                     leadingContent = {
                         Icon(Icons.Default.LocationOn, null, tint = Quiet, modifier = Modifier.size(20.dp))
                     },
-                    title = "所在位置",
+                    title = stringResource(R.string.editor_place_label),
                     subtitle = null,
                     titleColor = Quiet,
                     onClick = { showLocationPicker = true },
@@ -387,8 +397,8 @@ fun EditorPage(
                 leadingContent = {
                     Icon(Icons.Default.DateRange, null, tint = Quiet, modifier = Modifier.size(20.dp))
                 },
-                title = "事件时间",
-                subtitle = "${eventTime.take(10)} · ${eventTime.takeLast(5)}",
+                title = stringResource(R.string.editor_event_time_label),
+                subtitle = stringResource(R.string.editor_event_time_value, eventTime.take(10), eventTime.takeLast(5)),
                 titleColor = Ink,
                 onClick = { showEventTimePicker = true },
                 trailing = EditorMetaTrailing.Chevron,
@@ -406,7 +416,7 @@ fun EditorPage(
         }
         item {
             Spacer(Modifier.height(6.dp))
-            Text("文字或图片 / 动图 / 视频，至少填写一项",
+            Text(stringResource(R.string.editor_empty_hint),
                 modifier = Modifier.fillMaxWidth(),
                 color = if (EntryRules.canSave(body, visuals.size, feelingLocked && feeling.isNotBlank())) Quiet else Green,
                 fontSize = 12.sp,
@@ -418,16 +428,20 @@ fun EditorPage(
 
     extraUris?.takeUnless { LocalImprintsLocked.current }?.let { uris ->
         val remaining = (EntryRules.MAX_VISUALS - visuals.size).coerceAtLeast(0)
-        AlertDialog(onDismissRequest = { extraUris = null }, title = { Text("最多可添加 9 张") },
-            text = { Text("本次选了 ${uris.size} 张，最多还可以选择 $remaining 张。是否加入前 $remaining 张？") },
-            confirmButton = { TextButton(onClick = { extraUris = null; prepareUris(uris.take(remaining)) }) { Text("我知道了") } },
-            dismissButton = { TextButton(onClick = { extraUris = null }) { Text("取消") } })
+        AlertDialog(onDismissRequest = { extraUris = null }, title = { Text(stringResource(R.string.editor_max_images_title)) },
+            text = {
+                Text(
+                    stringResource(R.string.editor_max_images_message, uris.size, remaining, remaining)
+                )
+            },
+            confirmButton = { TextButton(onClick = { extraUris = null; prepareUris(uris.take(remaining)) }) { Text(stringResource(R.string.action_got_it)) } },
+            dismissButton = { TextButton(onClick = { extraUris = null }) { Text(stringResource(R.string.action_cancel)) } })
     }
     if (exitRequested && !LocalImprintsLocked.current) AlertDialog(onDismissRequest = { exitRequested = false },
-        title = { Text("有内容尚未保存") },
-        text = { Text("离开后，本次未保存的修改\n将不会保留。") },
-        confirmButton = { TextButton(onClick = { exitRequested = false; discardPending(); onCancel() }) { Text("放弃修改") } },
-        dismissButton = { TextButton(onClick = { exitRequested = false }) { Text("继续编辑") } })
+        title = { Text(stringResource(R.string.editor_unsaved_title)) },
+        text = { Text(stringResource(R.string.editor_unsaved_message)) },
+        confirmButton = { TextButton(onClick = { exitRequested = false; discardPending(); onCancel() }) { Text(stringResource(R.string.editor_discard)) } },
+        dismissButton = { TextButton(onClick = { exitRequested = false }) { Text(stringResource(R.string.editor_keep_editing)) } })
     if (showEventTimePicker) {
         val initialParsed = runCatching { LocalDateTime.parse(eventTime) }.getOrElse { LocalDateTime.now() }
         EventTimePickerSheet(
@@ -481,7 +495,7 @@ private fun AudioSourceSheet(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("添加声音", color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold,
+            Text(stringResource(R.string.editor_audio_title), color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(start = 4.dp, bottom = 2.dp))
             Surface(
                 Modifier.fillMaxWidth().clickable(onClick = onPickFile),
@@ -495,8 +509,8 @@ private fun AudioSourceSheet(
                 ) {
                     Text("♫", color = Ink, fontSize = 18.sp)
                     Column {
-                        Text("从文件选择", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                        Text("铃声、录音、下载目录里的音频", color = Quiet, fontSize = 12.sp)
+                        Text(stringResource(R.string.editor_audio_from_file), color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.editor_audio_from_file_sub), color = Quiet, fontSize = 12.sp)
                     }
                 }
             }
@@ -512,8 +526,8 @@ private fun AudioSourceSheet(
                 ) {
                     Box(Modifier.size(18.dp).background(Green, RoundedCornerShape(9.dp)))
                     Column {
-                        Text("系统录音机", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                        Text("打开录音机录一段，保存后选中它", color = Quiet, fontSize = 12.sp)
+                        Text(stringResource(R.string.editor_audio_recorder), color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.editor_audio_recorder_sub), color = Quiet, fontSize = 12.sp)
                     }
                 }
             }
@@ -527,12 +541,12 @@ private fun AudioSourceSheet(
                         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("移除声音", color = Danger, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.editor_audio_remove), color = Danger, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                     }
                 }
             }
             TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                Text("取消", color = Quiet, fontSize = 15.sp)
+                Text(stringResource(R.string.action_cancel), color = Quiet, fontSize = 15.sp)
             }
         }
     }
@@ -565,15 +579,15 @@ private fun EventTimePickerSheet(
             Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text("选择事件日期", color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            Text("选择事情发生的那一天", color = Quiet, fontSize = 13.sp)
+            Text(stringResource(R.string.editor_pick_date), color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.editor_pick_date_sub), color = Quiet, fontSize = 13.sp)
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = {
                     if (viewMonth <= 1) { viewMonth = 12; viewYear -= 1 } else viewMonth -= 1
-                }) { Text("‹ 上个月", color = Ink, fontSize = 13.sp) }
+                }) { Text(stringResource(R.string.editor_prev_month), color = Ink, fontSize = 13.sp) }
                 Text(
-                    "$viewYear 年 · $viewMonth 月",
+                    stringResource(R.string.editor_month_header, viewYear, viewMonth),
                     Modifier.weight(1f),
                     color = Ink,
                     fontSize = 16.sp,
@@ -582,7 +596,7 @@ private fun EventTimePickerSheet(
                 )
                 TextButton(onClick = {
                     if (viewMonth >= 12) { viewMonth = 1; viewYear += 1 } else viewMonth += 1
-                }) { Text("下个月 ›", color = Ink, fontSize = 13.sp) }
+                }) { Text(stringResource(R.string.editor_next_month), color = Ink, fontSize = 13.sp) }
             }
 
             val firstDay = LocalDate.of(viewYear, viewMonth, 1)
@@ -613,7 +627,10 @@ private fun EventTimePickerSheet(
                                             .clickable { date = LocalDate.of(viewYear, viewMonth, d) },
                                         contentAlignment = Alignment.Center,
                                     ) {
-                                        Text("$d", color = if (selected) Color.White else Ink, fontSize = 14.sp)
+                                        Text(
+                                            stringResource(R.string.calendar_day, d),
+                                            color = if (selected) Color.White else Ink, fontSize = 14.sp,
+                                        )
                                     }
                                     dayNumber++
                                 }
@@ -623,7 +640,10 @@ private fun EventTimePickerSheet(
                 }
             }
 
-            Text("已选：${date.year}年${date.monthValue}月${date.dayOfMonth}日", color = Ink, fontSize = 14.sp)
+            Text(
+                stringResource(R.string.editor_date_selected, date.year, date.monthValue, date.dayOfMonth),
+                color = Ink, fontSize = 14.sp,
+            )
 
             // 上下滑动选择时分（滚轮）
             Row(
@@ -647,7 +667,7 @@ private fun EventTimePickerSheet(
                     modifier = Modifier.width(72.dp),
                 )
             }
-            Text("上下滑动选择小时和分钟", color = Quiet, fontSize = 12.sp,
+            Text(stringResource(R.string.editor_time_hint), color = Quiet, fontSize = 12.sp,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 modifier = Modifier.fillMaxWidth())
 
@@ -656,13 +676,13 @@ private fun EventTimePickerSheet(
                     val now = LocalDateTime.now()
                     date = now.toLocalDate(); hour = now.hour; minute = now.minute
                     viewYear = now.year; viewMonth = now.monthValue
-                }) { Text("回到今天", color = Green) }
+                }) { Text(stringResource(R.string.editor_back_to_today), color = Green) }
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = onDismiss) { Text("取消", color = Quiet) }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel), color = Quiet) }
                 Button(
                     onClick = { onConfirm(LocalDateTime.of(date, java.time.LocalTime.of(hour, minute))) },
                     shape = RoundedCornerShape(12.dp),
-                ) { Text("确定") }
+                ) { Text(stringResource(R.string.action_confirm)) }
             }
         }
     }
@@ -737,7 +757,7 @@ private fun WheelPicker(
                 .height(itemHeight)
                 .background(PaleGreen, RoundedCornerShape(10.dp)),
         )
-        androidx.compose.foundation.lazy.LazyColumn(
+        LazyColumn(
             state = listState,
             flingBehavior = fling,
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -765,9 +785,10 @@ private fun WheelPicker(
     }
 }
 
-/** 媒体库文件名常为 UUID，展示时换成友好文案 */
+/** 媒体库文件名常为 UUID，展示时换成友好文案。@Composable 以便读取本地化文案。 */
+@Composable
 private fun friendlyAudioName(raw: String): String =
-    if (raw.matches(Regex("[0-9a-fA-F-]{36}"))) "音频记录" else raw
+    if (raw.matches(Regex("[0-9a-fA-F-]{36}"))) stringResource(R.string.audio_default_name) else raw
 
 internal enum class EditorMetaTrailing { Chevron, Clear, Expand }
 
@@ -916,7 +937,7 @@ private fun EditorAudioSelectedRow(
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Text(displayName, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-            Text(if (playing) "播放中 · 点按更换" else "音频 · 点按更换", color = Quiet, fontSize = 13.sp, maxLines = 1)
+            Text(if (playing) stringResource(R.string.audio_playing_tap_short) else stringResource(R.string.audio_tap_change), color = Quiet, fontSize = 13.sp, maxLines = 1)
         }
         IconButton(onClick = onRemove, modifier = Modifier.size(40.dp)) {
             Text("×", color = Quiet, fontSize = 22.sp)
@@ -1034,8 +1055,11 @@ private fun EditorMediaGrid(
                                     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.Center) {
                                         Icon(Icons.Default.Add, null, tint = Color(0xFF999999), modifier = Modifier.size(36.dp))
-                                        Text("图片/视频", color = Color(0xFF999999), fontSize = 12.sp)
-                                        Text("${visuals.size}/9", color = Color(0xFFBBBBBB), fontSize = 11.sp)
+                                        Text(stringResource(R.string.editor_media_section), color = Color(0xFF999999), fontSize = 12.sp)
+                                        Text(
+                                            stringResource(R.string.editor_media_counter, visuals.size),
+                                            color = Color(0xFFBBBBBB), fontSize = 11.sp,
+                                        )
                                     }
                                 }
                             }

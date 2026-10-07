@@ -70,6 +70,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.File
+import com.beyondguo.imprints.R
+import androidx.compose.ui.res.stringResource
+import kotlin.time.Duration.Companion.milliseconds
 
 private object PlaybackFocus {
     private var active: ExoPlayer? = null
@@ -119,7 +122,7 @@ fun MediaThumbnail(
     }
     Box(modifier.clip(RoundedCornerShape(10.dp)).background(Color(0xFFE7F4EE))
         .clickable { open = true }, contentAlignment = Alignment.Center) {
-        if (bitmap == null) Text(if (kind == "VIDEO") "视频" else "图片", color = Quiet)
+        if (bitmap == null) Text(if (kind == "VIDEO") stringResource(R.string.media_kind_video) else stringResource(R.string.media_kind_image), color = Quiet)
         else Image(bitmap!!.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         if (kind == "VIDEO" || hasMotion) Surface(shape = CircleShape, color = Color(0xB3222830)) {
             Icon(Icons.Default.PlayArrow, null, Modifier.padding(5.dp), tint = Color.White)
@@ -127,7 +130,7 @@ fun MediaThumbnail(
         if (kind == "GIF") Text("GIF", Modifier.align(Alignment.TopEnd).padding(5.dp)
             .background(Ink, RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 2.dp),
             color = Color.White, fontSize = 9.sp)
-        if (hasMotion && kind == "IMAGE") Text("动态", Modifier.align(Alignment.TopEnd).padding(5.dp)
+        if (hasMotion && kind == "IMAGE") Text(stringResource(R.string.media_motion), Modifier.align(Alignment.TopEnd).padding(5.dp)
             .background(Ink, RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 2.dp),
             color = Color.White, fontSize = 9.sp)
     }
@@ -170,10 +173,10 @@ fun FullscreenMediaViewer(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = onClose) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "关闭", tint = Color.White)
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.action_close), tint = Color.White)
                 }
                 Text(
-                    "${(page + 1).coerceAtLeast(1)} / ${cells.size}",
+                    stringResource(R.string.media_page_counter, (page + 1).coerceAtLeast(1), cells.size),
                     Modifier.weight(1f),
                     color = Color.White,
                     fontSize = 15.sp,
@@ -183,7 +186,7 @@ fun FullscreenMediaViewer(
                 Spacer(Modifier.width(48.dp))
             }
             Text(
-                "左右切换",
+                stringResource(R.string.a11y_swipe_media),
                 Modifier.align(Alignment.BottomCenter).padding(bottom = 36.dp),
                 color = Color(0xFFBBC5C0),
                 fontSize = 12.sp,
@@ -212,7 +215,7 @@ private fun FullscreenImageView(file: File) {
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Fit,
             )
-        } ?: Text("图片加载中…", color = Color.White.copy(alpha = 0.7f))
+        } ?: Text(stringResource(R.string.media_image_loading), color = Color.White.copy(alpha = 0.7f))
     }
 }
 
@@ -351,7 +354,7 @@ fun InlineAudio(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     LaunchedEffect(player, playing) {
-        while (playing) { position = player?.currentPosition ?: 0; delay(300) }
+        while (playing) { position = player?.currentPosition ?: 0; delay(300.milliseconds) }
     }
     Surface(shape = RoundedCornerShape(16.dp), color = Color.White, border = BorderStroke(1.dp, Line)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
@@ -375,19 +378,27 @@ fun InlineAudio(
         }, shape = CircleShape, color = PaleGreen) {
             if (playing) Text("Ⅱ", Modifier.padding(horizontal = 17.dp, vertical = 10.dp),
                 color = Green, fontSize = 18.sp)
-            else Icon(Icons.Default.PlayArrow, "播放音频", Modifier.padding(12.dp), tint = Green)
+            else Icon(Icons.Default.PlayArrow, stringResource(R.string.a11y_play_audio), Modifier.padding(12.dp), tint = Green)
         }
         Column(
             Modifier.weight(1f)
                 .then(if (onReplace != null) Modifier.clickable(onClick = onReplace) else Modifier),
         ) {
-            Text(file.nameWithoutExtension.ifBlank { "音频记录" }, color = Ink, fontSize = 14.sp,
-                fontWeight = FontWeight.Medium, maxLines = 1)
+            Text(
+                file.nameWithoutExtension.ifBlank { stringResource(R.string.audio_default_name) },
+                color = Ink, fontSize = 14.sp,
+                fontWeight = FontWeight.Medium, maxLines = 1,
+            )
+            val positionLabel = stringResource(
+                R.string.media_audio_time,
+                position / 1000,
+                (player?.duration ?: 0).coerceAtLeast(0) / 1000,
+            )
             Text(
                 when {
-                    playing -> "播放中 · 点击暂停"
-                    onReplace != null -> "点击更换 · 播放 " + "${position / 1000}s / ${(player?.duration ?: 0).coerceAtLeast(0) / 1000}s"
-                    else -> "点击播放"
+                    playing -> stringResource(R.string.audio_playing_tap)
+                    onReplace != null -> stringResource(R.string.audio_click_replace) + " · " + positionLabel
+                    else -> stringResource(R.string.audio_click_play)
                 },
                 color = Quiet, fontSize = 12.sp, maxLines = 1,
             )
@@ -397,8 +408,14 @@ fun InlineAudio(
                 Text("×", color = Quiet, fontSize = 22.sp)
             }
         } else {
-            Text("${position / 1000}s / ${(player?.duration ?: 0).coerceAtLeast(0) / 1000}s",
-                color = Quiet, fontSize = 11.sp)
+            Text(
+                stringResource(
+                    R.string.media_audio_time,
+                    position / 1000,
+                    (player?.duration ?: 0).coerceAtLeast(0) / 1000,
+                ),
+                color = Quiet, fontSize = 11.sp,
+            )
         }
         }
     }

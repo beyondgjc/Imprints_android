@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -48,6 +47,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import kotlin.time.Duration.Companion.milliseconds
+import com.beyondguo.imprints.R
+import androidx.compose.ui.res.stringResource
 
 private val Gold = Color(0xFFF2CE7B)
 private val DeepGreen = Color(0xFF06A854)
@@ -87,8 +88,8 @@ fun TreasureFeelingSection(
         EditorMetaRow(
             leadingContent = { TreasureGem(Modifier.size(20.dp)) },
             leadingTint = Color(0xFFF7F4EC),
-            title = "感受",
-            subtitle = "加密已开启 · 验证后才能填写",
+            title = stringResource(R.string.feeling_title),
+            subtitle = stringResource(R.string.feeling_locked_sub),
             titleColor = Ink,
             onClick = { lockedExpanded = !lockedExpanded },
             trailing = EditorMetaTrailing.Expand,
@@ -106,16 +107,16 @@ fun TreasureFeelingSection(
 
     val subtitle = when {
         !expanded && hasText -> feeling.replace('\n', ' ').take(20) + if (feeling.length > 20) "…" else ""
-        !expanded -> "可选 · 保存后刮开可见"
+        !expanded -> stringResource(R.string.feeling_optional_hint)
         hasText -> null
-        else -> "写下那一刻的感受"
+        else -> stringResource(R.string.feeling_write_prompt)
     }
 
     Column(Modifier.fillMaxWidth()) {
         EditorMetaRow(
             leadingContent = { TreasureGem(Modifier.size(20.dp)) },
             leadingTint = Color(0xFFF7F4EC),
-            title = "感受",
+            title = stringResource(R.string.feeling_title),
             subtitle = subtitle,
             titleColor = if (expanded) Ink else if (hasText) Ink else Quiet,
             onClick = { expanded = !expanded },
@@ -144,7 +145,7 @@ fun TreasureFeelingSection(
                     onValueChange = onFeelingChange,
                     placeholder = {
                         Text(
-                            "那一刻，你有什么感受？",
+                            stringResource(R.string.feeling_prompt),
                             color = MapInk.copy(alpha = 0.65f),
                             fontSize = 15.sp,
                         )
@@ -194,8 +195,8 @@ private fun TreasureEmptyHint() {
         }
         Spacer(Modifier.width(8.dp))
         Column {
-            Text("此刻的心情，是一份小宝藏", color = MapInk, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-            Text("写下它，和这条印迹一起封存", color = Quiet, fontSize = 11.sp)
+            Text(stringResource(R.string.feeling_empty_title), color = MapInk, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text(stringResource(R.string.feeling_empty_sub), color = Quiet, fontSize = 11.sp)
         }
     }
 }
@@ -217,7 +218,7 @@ private fun SealedPreviewChip() {
                 .background(Green),
         )
         Spacer(Modifier.width(6.dp))
-        Text("保存后盖绿涂层 · 刮开可见", color = DeepGreen, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+        Text(stringResource(R.string.feeling_scrape_hint), color = DeepGreen, fontSize = 10.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -259,19 +260,19 @@ private fun TreasureLockedCard(onUnlock: () -> Unit, onBiometric: (() -> Unit)? 
                 }
                 Spacer(Modifier.width(10.dp))
                 Column {
-                    Text("宝藏箱已上锁", color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                    Text("感受加密开启中，先验证才能继续埋", color = Quiet, fontSize = 12.sp)
+                    Text(stringResource(R.string.feeling_locked_title), color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.feeling_locked_blocking), color = Quiet, fontSize = 12.sp)
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (onBiometric != null) {
                     TextButton(onClick = onBiometric) {
-                        Text("使用指纹", color = Green, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.feeling_use_fingerprint), color = Green, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                     }
                 }
                 TextButton(onClick = onUnlock) {
                     Text(
-                        if (onBiometric != null) "改用口令" else "解锁后填写感受",
+                        if (onBiometric != null) stringResource(R.string.bio_switch_to_pin) else stringResource(R.string.feeling_unlock_then_fill),
                         color = Green,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,

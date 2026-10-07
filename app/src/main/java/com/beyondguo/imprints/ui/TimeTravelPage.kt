@@ -37,6 +37,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.time.LocalDate
 import java.time.YearMonth
+import com.beyondguo.imprints.R
+import androidx.compose.ui.res.stringResource
 
 private val PageBg = Color(0xFFF4F3F0)
 private val TabTrack = Color(0xFFFFFFFF)
@@ -77,10 +79,10 @@ fun TimeTravelPage(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = Ink)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.action_back), tint = Ink)
             }
             Text(
-                "按时间定位",
+                stringResource(R.string.timetravel_title),
                 Modifier.weight(1f),
                 color = Ink,
                 fontSize = 17.sp,
@@ -98,12 +100,12 @@ fun TimeTravelPage(
         ) {
             Row {
                 SegmentTab(
-                    label = "按月",
+                    label = stringResource(R.string.timetravel_by_month),
                     selected = tab is TravelTab.Month,
                     modifier = Modifier.weight(1f).height(44.dp),
                 ) { tab = TravelTab.Month }
                 SegmentTab(
-                    label = "按日",
+                    label = stringResource(R.string.timetravel_by_day),
                     selected = tab is TravelTab.Day,
                     modifier = Modifier.weight(1f).height(44.dp),
                 ) { tab = TravelTab.Day }
@@ -162,7 +164,7 @@ private fun MonthPanel(
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
         Spacer(Modifier.height(18.dp))
         Text(
-            "沿着时间，回到那段日子",
+            stringResource(R.string.timetravel_month_title),
             Modifier.fillMaxWidth(),
             color = Ink,
             fontSize = 15.sp,
@@ -170,7 +172,7 @@ private fun MonthPanel(
             textAlign = TextAlign.Center,
         )
         Text(
-            "轻点月份，即刻穿梭",
+            stringResource(R.string.timetravel_month_sub),
             Modifier.fillMaxWidth().padding(top = 4.dp),
             color = Quiet,
             fontSize = 12.sp,
@@ -187,7 +189,7 @@ private fun MonthPanel(
                 .clip(CircleShape)
                 .clickable { onYearChange(year - 1) }
                 .padding(horizontal = 16.dp, vertical = 4.dp))
-            Text("$year 年", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.timetravel_year, year), color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             Text("›", color = Quiet, fontSize = 22.sp, modifier = Modifier
                 .clip(CircleShape)
                 .clickable { onYearChange(year + 1) }
@@ -203,7 +205,7 @@ private fun MonthPanel(
                         val monthKey = "%04d-%02d".format(year, m + 1)
                         val has = monthsWithEntries.contains(monthKey)
                         MonthCell(
-                            label = "${m + 1}月",
+                            label = stringResource(R.string.timetravel_month, m + 1),
                             hasEntries = has,
                             modifier = Modifier.weight(1f).height(52.dp),
                             onClick = { onSelect(m + 1) },
@@ -219,11 +221,11 @@ private fun MonthPanel(
                 Modifier.size(6.dp).clip(CircleShape).background(DotGreen)
             )
             Spacer(Modifier.width(6.dp))
-            Text("绿点表示该月有印迹", color = Quiet, fontSize = 12.sp)
+            Text(stringResource(R.string.timetravel_month_dot), color = Quiet, fontSize = 12.sp)
         }
         Spacer(Modifier.height(40.dp))
         Text(
-            "时间不会倒流，印迹可以带你回去",
+            stringResource(R.string.timetravel_day_title),
             Modifier.fillMaxWidth(),
             color = Quiet.copy(alpha = 0.7f),
             fontSize = 12.sp,
@@ -275,7 +277,7 @@ private fun DayPanel(
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
         Spacer(Modifier.height(18.dp))
         Text(
-            "选一天，回到那天附近",
+            stringResource(R.string.timetravel_day_sub),
             Modifier.fillMaxWidth(),
             color = Ink,
             fontSize = 15.sp,
@@ -283,7 +285,7 @@ private fun DayPanel(
             textAlign = TextAlign.Center,
         )
         Text(
-            "轻点日期，即刻穿梭",
+            stringResource(R.string.timetravel_day_tap),
             Modifier.fillMaxWidth().padding(top = 4.dp),
             color = Quiet,
             fontSize = 12.sp,
@@ -302,7 +304,7 @@ private fun DayPanel(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    "‹ 上个月",
+                    stringResource(R.string.editor_prev_month),
                     color = Quiet,
                     fontSize = 13.sp,
                     modifier = Modifier
@@ -311,13 +313,13 @@ private fun DayPanel(
                         .padding(horizontal = 8.dp, vertical = 4.dp),
                 )
                 Text(
-                    "${month.year}年${month.monthValue}月",
+                    stringResource(R.string.timetravel_month_full, month.year, month.monthValue),
                     color = Ink,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    "下个月 ›",
+                    stringResource(R.string.editor_next_month),
                     color = Quiet,
                     fontSize = 13.sp,
                     modifier = Modifier
@@ -372,11 +374,11 @@ private fun DayPanel(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(6.dp).clip(CircleShape).background(DotGreen))
             Spacer(Modifier.width(6.dp))
-            Text("绿点表示当天有印迹", color = Quiet, fontSize = 12.sp)
+            Text(stringResource(R.string.timetravel_day_dot), color = Quiet, fontSize = 12.sp)
         }
         Spacer(Modifier.height(28.dp))
         Text(
-            "每一个日子，都通向一段印迹",
+            stringResource(R.string.timetravel_day_heading),
             Modifier.fillMaxWidth(),
             color = Quiet.copy(alpha = 0.7f),
             fontSize = 12.sp,
@@ -407,7 +409,7 @@ private fun DayCell(
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                "$day",
+                stringResource(R.string.calendar_day, day),
                 color = if (isToday) DotGreen else Ink,
                 fontSize = 14.sp,
                 fontWeight = if (isToday || hasEntries) FontWeight.SemiBold else FontWeight.Normal,

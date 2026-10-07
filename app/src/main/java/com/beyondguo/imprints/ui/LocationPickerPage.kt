@@ -7,13 +7,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -57,6 +55,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
+import com.beyondguo.imprints.R
+import androidx.compose.ui.res.stringResource
+import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * 微信风格「所在位置」选择页：
@@ -100,25 +101,38 @@ fun LocationPickerPage(
         )
     }
 
+    // 这些文案在 Composable 主体里取一次，供下面的 suspend fun loadNearby() 闭包捕获。
+    // 不用 context.getString：LocalContext.current 会随重组变化，在长耗时 suspend 函数里
+    // 持有它查资源有拿到过期 Context 的风险；stringResource 走的是当前 composition 的资源。
+    val hintLocating = stringResource(R.string.location_locating)
+    val hintLocateFailed = stringResource(R.string.location_locate_failed)
+    val hintSearching = stringResource(R.string.location_nearby_searching)
+    val hintEmpty = stringResource(R.string.location_nearby_empty)
+    val hintUnavailable = stringResource(R.string.location_nearby_unavailable)
+
+    val hintNotGranted = stringResource(R.string.location_not_granted)
+    val hintTapAllow = stringResource(R.string.location_tap_allow)
+    val hintTapAllowShort = stringResource(R.string.location_tap_allow_short)
+
     suspend fun loadNearby() {
         nearbyLoading = true
-        nearbyHint = "正在定位…"
+        nearbyHint = hintLocating
         val wgs = DeviceLocation.fetchWgs84(context, timeoutMs = 12_000)
         if (wgs == null) {
             nearbyLoading = false
-            nearbyHint = "定位失败或超时，可点右上角搜索地点"
+            nearbyHint = hintLocateFailed
             return
         }
         lastWgs = wgs
         val (gcjLat, gcjLng) = Wgs84GCJ02.toGcj02(wgs.first, wgs.second)
-        nearbyHint = "正在查找附近地点…"
+        nearbyHint = hintSearching
         runCatching {
-            kotlinx.coroutines.withTimeout(8_000) {
+            kotlinx.coroutines.withTimeout(8_000.milliseconds) {
                 AmapPoiService.searchNearby(context, gcjLat, gcjLng)
             }
         }.onSuccess { list ->
             nearby = list
-            nearbyHint = if (list.isEmpty()) "附近暂无结果，可搜索地点" else ""
+            nearbyHint = if (list.isEmpty()) hintEmpty else ""
             // 用第一条粗略城市（地址首段）作分区标题
             cityLabel = list.firstOrNull()?.address
                 ?.substringBefore("省")
@@ -132,7 +146,7 @@ fun LocationPickerPage(
                 ?: ""
         }.onFailure { error ->
             nearby = emptyList()
-            nearbyHint = "附近地点暂不可用，可搜索地点"
+            nearbyHint = hintUnavailable
             if (error !is kotlinx.coroutines.TimeoutCancellationException) report(error)
         }
         nearbyLoading = false
@@ -144,7 +158,7 @@ fun LocationPickerPage(
         if (ok) {
             scope.launch { loadNearby() }
         } else {
-            nearbyHint = "未授权定位，可搜索地点或返回"
+            nearbyHint = hintNotGranted
         }
     }
 
@@ -157,7 +171,7 @@ fun LocationPickerPage(
         if (fine || coarse) {
             loadNearby()
         } else {
-            nearbyHint = "点击允许定位，查看附近地点"
+            nearbyHint = hintTapAllow
         }
     }
 
@@ -170,12 +184,12 @@ fun LocationPickerPage(
             searching = false
             return@LaunchedEffect
         }
-        delay(350)
+        delay(350.milliseconds)
         if (query.trim() != q) return@LaunchedEffect
         searching = true
         searchJob = scope.launch {
             runCatching {
-                kotlinx.coroutines.withTimeout(8_000) { AmapPoiService.searchKeyword(context, q) }
+                kotlinx.coroutines.withTimeout(8_000.milliseconds) { AmapPoiService.searchKeyword(context, q) }
             }.onSuccess { list ->
                 if (query.trim() == q) searchResults = list
             }.onFailure { error ->
@@ -201,10 +215,10 @@ fun LocationPickerPage(
                     searchResults = emptyList()
                 } else onBack()
             }) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = Ink)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.action_back), tint = Ink)
             }
             Text(
-                "所在位置",
+                stringResource(R.string.editor_place_label),
                 Modifier.weight(1f),
                 color = Ink,
                 fontSize = 17.sp,
@@ -213,9 +227,9 @@ fun LocationPickerPage(
             )
             IconButton(onClick = { searchMode = !searchMode }) {
                 if (searchMode) {
-                    Icon(Icons.Default.Close, "关闭搜索", tint = Ink)
+                    Icon(Icons.Default.Close, stringResource(R.string.a11y_close_search), tint = Ink)
                 } else {
-                    Icon(Icons.Default.Search, "搜索地点", tint = Ink)
+                    Icon(Icons.Default.Search, stringResource(R.string.location_search_hint), tint = Ink)
                 }
             }
         }
@@ -224,7 +238,7 @@ fun LocationPickerPage(
             OutlinedTextField(
                 query,
                 { query = it },
-                placeholder = { Text("搜索地点", color = Quiet) },
+                placeholder = { Text(stringResource(R.string.location_search_hint), color = Quiet) },
                 leadingIcon = { Icon(Icons.Default.Search, null, tint = Quiet, modifier = Modifier.size(18.dp)) },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                 singleLine = true,
@@ -235,13 +249,13 @@ fun LocationPickerPage(
                 ),
             )
             if (searching) {
-                Text("搜索中…", Modifier.padding(horizontal = 20.dp, vertical = 8.dp), color = Quiet, fontSize = 13.sp)
+                Text(stringResource(R.string.location_searching), Modifier.padding(horizontal = 20.dp, vertical = 8.dp), color = Quiet, fontSize = 13.sp)
             }
             LazyColumn(Modifier.fillMaxSize()) {
                 if (searchResults.isEmpty() && !searching && query.isNotBlank()) {
                     item {
                         Text(
-                            "未找到相关地点",
+                            stringResource(R.string.location_not_found),
                             Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
                             color = Quiet,
                             fontSize = 14.sp,
@@ -264,7 +278,7 @@ fun LocationPickerPage(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            "不显示位置",
+                            stringResource(R.string.location_none),
                             Modifier.weight(1f),
                             color = if (selected == null) Green else Ink,
                             fontSize = 16.sp,
@@ -297,7 +311,7 @@ fun LocationPickerPage(
                 if (selected != null && selected.name.isNotBlank()) {
                     item {
                         Text(
-                            "清除已选择的位置",
+                            stringResource(R.string.location_clear),
                             Modifier.fillMaxWidth()
                                 .clickable { onSelect(null) }
                                 .padding(horizontal = 20.dp, vertical = 12.dp),
@@ -309,7 +323,7 @@ fun LocationPickerPage(
                 }
 
                 // 未授权 → 引导
-                if (nearbyHint.startsWith("点击允许")) {
+                if (nearbyHint.startsWith(hintTapAllowShort)) {
                     item {
                         TextButton(
                             onClick = {
@@ -322,10 +336,10 @@ fun LocationPickerPage(
                             },
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
                         ) {
-                            Text("允许定位，查看附近地点", color = Green, fontSize = 15.sp)
+                            Text(stringResource(R.string.location_grant), color = Green, fontSize = 15.sp)
                         }
                         Text(
-                            "仅在本次选择时请求定位权限",
+                            stringResource(R.string.location_grant_sub),
                             Modifier.padding(horizontal = 20.dp),
                             color = Quiet,
                             fontSize = 12.sp,
@@ -361,7 +375,7 @@ fun LocationPickerPage(
                 if (nearby.isNotEmpty()) {
                     item {
                         Text(
-                            cityLabel.ifBlank { "附近地点" },
+                            cityLabel.ifBlank { stringResource(R.string.location_nearby_title) },
                             Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
                             color = Ink,
                             fontSize = 15.sp,
@@ -378,7 +392,7 @@ fun LocationPickerPage(
 
                 item {
                     Text(
-                        "位置为可选字段，可随时更换或移除",
+                        stringResource(R.string.location_optional_hint),
                         Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 24.dp),
                         color = Quiet,
                         fontSize = 12.sp,
@@ -399,7 +413,13 @@ private fun PoiRow(item: PoiResultItem, selected: Boolean, onClick: () -> Unit) 
             Text(item.name, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.Medium)
             val meta = buildString {
                 item.distanceMeters?.let { d ->
-                    append(if (d < 1000) "${d}m内" else "%.1fkm".format(d / 1000.0))
+                    append(
+                        if (d < 1000) {
+                            stringResource(R.string.format_distance_m, d)
+                        } else {
+                            stringResource(R.string.format_distance_km, "%.1f".format(d / 1000.0))
+                        }
+                    )
                     if (item.address.isNotBlank()) append(" | ")
                 }
                 append(item.address)

@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.beyondguo.imprints.R
 
 internal val Ink = Color(0xFF242830)
 internal val Quiet = Color(0xFF858D9B)
@@ -136,4 +137,14 @@ internal fun SettingsSwitchRow(
 @Composable
 internal fun FineDivider(modifier: Modifier = Modifier) {
     HorizontalDivider(modifier.padding(horizontal = 16.dp), color = Color(0xFFE4E5E7), thickness = 1.dp)
+}
+
+/**
+ * 本地化星期名（索引 0 = 周一）。
+ * 做成 string-array 而非硬编码 listOf(...)，因为各 locale 的星期排列顺序与缩写都不同。
+ */
+@Composable
+internal fun weekdayNames(): List<String> {
+    val arr = androidx.compose.ui.res.stringArrayResource(R.array.weekdays)
+    return arr.toList()
 }

@@ -67,6 +67,8 @@ import com.beyondguo.imprints.data.ImprintRepository
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.net.Uri
+import com.beyondguo.imprints.R
+import androidx.compose.ui.res.stringResource
 
 private sealed interface Page {
     data object Timeline : Page
@@ -112,7 +114,46 @@ fun ImprintsApp(
     var backupPreview by remember { mutableStateOf<BackupPreview?>(null) }
     var pendingExportUri by remember { mutableStateOf<Uri?>(null) }
     var pendingImportPreview by remember { mutableStateOf<BackupPreview?>(null) }
-    fun report(error: Throwable) { scope.launch { snackbar.showSnackbar(error.message ?: "操作失败") } }
+    // 这些文案在 lambda / 非 Composable 上下文里被引用（report、scope.launch、askPin），
+    // 不能在那里直接调 stringResource，所以在 Composable 入口先取成局部 val 闭包捕获。
+    val errGeneric = stringResource(R.string.err_generic)
+    val bioUsePinFallback = stringResource(R.string.bio_use_pin_fallback)
+    val exportDone = stringResource(R.string.export_done)
+    val recycleRestored = stringResource(R.string.recycle_restored)
+    // 带数量的文案：运行时用 Resources 格式化（locale 感知）。
+    // 用 context.resources 而非 context.getString，避免在 lambda 里查资源触发 lint 警告。
+    val importDone: (Int) -> String = { n -> context.resources.getString(R.string.import_done, n) }
+    val recycleMoved = stringResource(R.string.recycle_moved)
+    val deleteDone = stringResource(R.string.delete_done)
+    val bioFeelingEnabled = stringResource(R.string.bio_feeling_enabled)
+    val bioFeelingFailed = stringResource(R.string.bio_feeling_failed)
+    val bioAppEnabled = stringResource(R.string.bio_app_enabled)
+    val pinUnlockFeeling = stringResource(R.string.pin_unlock_feeling)
+    val pinSetFeeling = stringResource(R.string.pin_set_feeling)
+    val pinSetFeelingNew = stringResource(R.string.pin_set_feeling_new)
+    val pinVerifyFeelingCurrent = stringResource(R.string.pin_verify_feeling_current)
+    val pinVerifyFeelingBackup = stringResource(R.string.pin_verify_feeling_backup)
+    val pinVerifyBeforeBio = stringResource(R.string.pin_verify_before_bio)
+    val errFeelingPin = stringResource(R.string.err_feeling_pin)
+    val pinVerifyApp = stringResource(R.string.pin_verify_app)
+    val pinSetApp = stringResource(R.string.pin_set_app)
+    val pinSetAppNew = stringResource(R.string.pin_set_app_new)
+    val pinVerifyAppCurrent = stringResource(R.string.pin_verify_app_current)
+    val pinVerifyAppBeforeBio = stringResource(R.string.pin_verify_app_before_bio)
+    val errAppPin = stringResource(R.string.err_app_pin)
+    val backupSetPassword = stringResource(R.string.backup_set_password)
+    val backupInputPassword = stringResource(R.string.backup_input_password)
+    val pageSearch = stringResource(R.string.page_search)
+    val pageDetail = stringResource(R.string.page_detail)
+    val pageRecycleDetail = stringResource(R.string.page_recycle_detail)
+    val pageLocationDetail = stringResource(R.string.page_location_detail)
+    val editorNewTitle = stringResource(R.string.editor_new_title)
+    val editorEditTitle = stringResource(R.string.editor_edit_title)
+
+    val pinVerifyFeeling6 = stringResource(R.string.pin_verify_feeling_6)
+    val errPinLocked = stringResource(R.string.err_pin_locked)
+    val errUnlockFailed = stringResource(R.string.err_unlock_failed)
+    fun report(error: Throwable) { scope.launch { snackbar.showSnackbar(error.message ?: errGeneric) } }
     fun askPin(action: String, title: String) { pinAction = action; pinTitle = title }
     val createBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         if (uri != null) pendingExportUri = uri else backupPassword = ""
@@ -141,7 +182,7 @@ fun ImprintsApp(
         target: String,
         after: () -> Unit = {},
         fallback: () -> Unit = {
-            scope.launch { snackbar.showSnackbar("请使用对应的 6 位口令") }
+            scope.launch { snackbar.showSnackbar(bioUsePinFallback) }
         },
         onSuccess: () -> Unit = {},
         onUnavailable: (() -> Unit)? = null,
@@ -159,7 +200,7 @@ fun ImprintsApp(
         val importPreview = pendingImportPreview
         if (exportUri == null && importPreview == null) return@LaunchedEffect
         if (security.state().feelingMode == "ON" && !security.isFeelingUnlocked()) {
-            askPin(if (exportUri != null) "feeling-export" else "feeling-import", "验证感受口令后继续备份")
+            askPin(if (exportUri != null) "feeling-export" else "feeling-import", pinVerifyFeelingBackup)
             return@LaunchedEffect
         }
         if (exportUri != null) {
@@ -167,7 +208,7 @@ fun ImprintsApp(
             val password = backupPassword.toCharArray()
             scope.launch {
                 runCatching { backup.export(exportUri, password) }
-                    .onSuccess { snackbar.showSnackbar("加密备份已导出") }.onFailure(::report)
+                    .onSuccess { snackbar.showSnackbar(exportDone) }.onFailure(::report)
                 password.fill('\u0000')
                 backupPassword = ""
             }
@@ -178,7 +219,7 @@ fun ImprintsApp(
             scope.launch {
                 runCatching { backup.import(uri, password, importPreview,
                     allowPlaintextConversion = importPreview.feelingMode == "ON" && feelingMode == "OFF") }
-                    .onSuccess { snackbar.showSnackbar("已导入 $it 条印迹") }.onFailure(::report)
+                    .onSuccess { count -> scope.launch { snackbar.showSnackbar(importDone(count)) } }.onFailure(::report)
                 password.fill('\u0000')
                 backupPassword = ""
                 importUri = null
@@ -187,7 +228,7 @@ fun ImprintsApp(
     }
 
     if (!initialized) {
-        Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) { Text("正在加载印迹…") }
+        Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) { Text(stringResource(R.string.state_loading_timeline)) }
         return
     }
     Box(Modifier.fillMaxSize()) {
@@ -205,13 +246,13 @@ fun ImprintsApp(
         topBar = {
             if (page != Page.Timeline && page !is Page.Editor) CenterAlignedTopAppBar(
                 title = { Text(when (page) {
-                    Page.Timeline -> "我的印迹"; Page.Settings -> "设置"; Page.Recycle -> "回收站"
-                    Page.Search -> "搜索正文"; is Page.Detail -> "印迹详情"
-                    is Page.RecycleDetail -> "回收站详情"
-                    is Page.Editor -> if ((page as Page.Editor).id == null) "新建印迹" else "编辑印迹"
-                    is Page.LocationDetail -> "位置详情"
-                    Page.PrivacyPolicy -> "隐私政策"
-                    Page.UserAgreement -> "用户协议"
+                    Page.Timeline -> stringResource(R.string.timeline_title); Page.Settings -> "设置"; Page.Recycle -> stringResource(R.string.settings_recycle)
+                    Page.Search -> pageSearch; is Page.Detail -> pageDetail
+                    is Page.RecycleDetail -> pageRecycleDetail
+                    is Page.Editor -> if ((page as Page.Editor).id == null) editorNewTitle else editorEditTitle
+                    is Page.LocationDetail -> pageLocationDetail
+                    Page.PrivacyPolicy -> stringResource(R.string.settings_privacy_policy)
+                    Page.UserAgreement -> stringResource(R.string.settings_user_agreement)
                 }, color = Ink, fontWeight = FontWeight.Bold, fontSize = 20.sp) },
                 navigationIcon = { IconButton(onClick = {
                     page = when (page) {
@@ -219,12 +260,12 @@ fun ImprintsApp(
                         is Page.PrivacyPolicy, is Page.UserAgreement -> Page.Settings
                         else -> Page.Timeline
                     }
-                }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = Ink) } },
+                }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.action_back), tint = Ink) } },
                 actions = {
                     // 设计 41：详情顶栏右上角「编辑」
                     if (page is Page.Detail) {
                         TextButton(onClick = { page = Page.Editor((page as Page.Detail).id) }) {
-                            Text("编辑", color = Green, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                            Text(stringResource(R.string.action_edit), color = Green, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                         }
                     }
                 },
@@ -234,7 +275,7 @@ fun ImprintsApp(
         snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = { if (page == Page.Timeline) FloatingActionButton(
             onClick = { page = Page.Editor(null) }, shape = CircleShape, containerColor = Green,
-            contentColor = Color.White) { Icon(Icons.Default.Add, "新建印迹") } },
+            contentColor = Color.White) { Icon(Icons.Default.Add, editorNewTitle) } },
     ) { padding ->
         Box(
             Modifier
@@ -246,11 +287,11 @@ fun ImprintsApp(
                 Page.Timeline -> TimelinePage(active, repository, revealEpoch + securityEpoch,
                     onOpen = { page = Page.Detail(it) },
                     onSearch = { page = Page.Search }, onSettings = { page = Page.Settings },
-                    onUnlock = { askPin("feeling-unlock", "解锁感受") },
+                    onUnlock = { askPin("feeling-unlock", pinUnlockFeeling) },
                     onBiometric = {
                         tryBiometric(
                             "feeling-unlock",
-                            onUnavailable = { askPin("feeling-unlock", "解锁感受") },
+                            onUnavailable = { askPin("feeling-unlock", pinUnlockFeeling) },
                         )
                     },
                     scrollToId = pendingScrollToId,
@@ -259,7 +300,7 @@ fun ImprintsApp(
                 Page.Settings -> SettingsPage(feelingMode, feelingBioEnabled, appLockEnabled, appBioEnabled,
                     onRecycle = { page = Page.Recycle },
                     onFeeling = {
-                        if (feelingMode == "OFF") askPin("feeling-enable", "设置感受 6 位口令")
+                        if (feelingMode == "OFF") askPin("feeling-enable", pinSetFeeling)
                         else confirmDisableFeeling = true
                     },
                     onFeelingBio = {
@@ -268,43 +309,43 @@ fun ImprintsApp(
                         } else if (security.isFeelingUnlocked()) {
                             tryBiometric(
                                 "feeling-enable",
-                                onSuccess = { scope.launch { snackbar.showSnackbar("感受生物识别已开启") } },
+                                onSuccess = { scope.launch { snackbar.showSnackbar(bioFeelingEnabled) } },
                                 onUnavailable = {
                                     scope.launch {
-                                        snackbar.showSnackbar("指纹验证未弹出或未完成，感受生物识别未开启")
+                                        snackbar.showSnackbar(bioFeelingFailed)
                                     }
                                 },
                             )
                         } else {
-                            askPin("feeling-bio", "先验证感受口令，再开启生物识别")
+                            askPin("feeling-bio", pinVerifyBeforeBio)
                         }
                     },
                     onFeelingPinChange = {
                         if (feelingBioEnabled) tryBiometric("feeling-unlock",
-                            after = { askPin("feeling-change-new", "设置新的感受 6 位口令") },
-                            fallback = { askPin("feeling-change-old", "验证当前感受口令") })
-                        else askPin("feeling-change-old", "验证当前感受口令")
+                            after = { askPin("feeling-change-new", pinSetFeelingNew) },
+                            fallback = { askPin("feeling-change-old", pinVerifyFeelingCurrent) })
+                        else askPin("feeling-change-old", pinVerifyFeelingCurrent)
                     },
                     onAppLock = {
-                        if (appLockEnabled) askPin("app-disable", "验证应用锁口令")
-                        else askPin("app-enable", "设置应用锁 6 位口令")
+                        if (appLockEnabled) askPin("app-disable", pinVerifyApp)
+                        else askPin("app-enable", pinSetApp)
                     },
                     onAppBio = {
                         if (appBioEnabled) scope.launch {
                             runCatching { security.setAppLockBiometricEnabled(false) }.onSuccess { securityEpoch++ }.onFailure(::report)
                         } else if (appLockEnabled) {
                             // 开启前先验证应用锁口令（与 PRD 一致）
-                            askPin("app-bio", "验证应用锁口令后开启生物识别")
+                            askPin("app-bio", pinVerifyAppBeforeBio)
                         } else {
                             tryBiometric("app-enable",
-                                onSuccess = { scope.launch { snackbar.showSnackbar("应用锁生物识别已开启") } })
+                                onSuccess = { scope.launch { snackbar.showSnackbar(bioAppEnabled) } })
                         }
                     },
                     onAppPinChange = {
                         if (appBioEnabled) tryBiometric("app-change",
-                            after = { askPin("app-change-new", "设置新的应用锁 6 位口令") },
-                            fallback = { askPin("app-change-old", "验证当前应用锁口令") })
-                        else askPin("app-change-old", "验证当前应用锁口令")
+                            after = { askPin("app-change-new", pinSetAppNew) },
+                            fallback = { askPin("app-change-old", pinVerifyAppCurrent) })
+                        else askPin("app-change-old", pinVerifyAppCurrent)
                     },
                     onExport = { backupAction = "export" },
                     onImport = { openBackup.launch(arrayOf("*/*")) },
@@ -314,15 +355,15 @@ fun ImprintsApp(
                     onOpenUserAgreement = { page = Page.UserAgreement },
                     onRevokeConsent = onRevokeConsent,
                 )
-                Page.PrivacyPolicy -> PolicyDocumentPage("隐私政策", "privacy_policy.txt") { page = Page.Settings }
-                Page.UserAgreement -> PolicyDocumentPage("用户协议", "user_agreement.txt") { page = Page.Settings }
+                Page.PrivacyPolicy -> PolicyDocumentPage(stringResource(R.string.settings_privacy_policy), "privacy_policy.txt") { page = Page.Settings }
+                Page.UserAgreement -> PolicyDocumentPage(stringResource(R.string.settings_user_agreement), "user_agreement.txt") { page = Page.Settings }
                 Page.Recycle -> RecyclePage(recycled,
                     onOpen = { page = Page.RecycleDetail(it) },
                     onRestore = { id ->
                         scope.launch {
                             runCatching { repository.restore(id) }
                                 .onSuccess {
-                                    snackbar.showSnackbar("已恢复到时间线")
+                                    snackbar.showSnackbar(recycleRestored)
                                     page = Page.Timeline
                                 }
                                 .onFailure(::report)
@@ -339,17 +380,17 @@ fun ImprintsApp(
                         scope.launch {
                             runCatching { repository.moveToRecycle(current.id) }
                                 .onSuccess {
-                                    snackbar.showSnackbar("已移入回收站 · 可在回收站恢复")
+                                    snackbar.showSnackbar(recycleMoved)
                                     page = Page.Timeline
                                 }
                                 .onFailure(::report)
                         }
                     },
-                    onUnlock = { askPin("feeling-unlock", "解锁感受") },
+                    onUnlock = { askPin("feeling-unlock", pinUnlockFeeling) },
                     onBiometric = {
                         tryBiometric(
                             "feeling-unlock",
-                            onUnavailable = { askPin("feeling-unlock", "解锁感受") },
+                            onUnavailable = { askPin("feeling-unlock", pinUnlockFeeling) },
                         )
                     },
                     onOpenPlace = { place -> page = Page.LocationDetail(place) })
@@ -358,16 +399,16 @@ fun ImprintsApp(
                     onDelete = {
                         scope.launch {
                             runCatching { repository.deletePermanently(current.id) }
-                                .onSuccess { snackbar.showSnackbar("已彻底删除") }
+                                .onSuccess { snackbar.showSnackbar(deleteDone) }
                                 .onFailure(::report)
                             page = Page.Recycle
                         }
                     },
-                    onUnlock = { askPin("feeling-unlock", "解锁感受") },
+                    onUnlock = { askPin("feeling-unlock", pinUnlockFeeling) },
                     onBiometric = {
                         tryBiometric(
                             "feeling-unlock",
-                            onUnavailable = { askPin("feeling-unlock", "解锁感受") },
+                            onUnavailable = { askPin("feeling-unlock", pinUnlockFeeling) },
                         )
                     },
                     onOpenPlace = { place -> page = Page.LocationDetail(place) },
@@ -375,7 +416,7 @@ fun ImprintsApp(
                         scope.launch {
                             runCatching { repository.restore(current.id) }
                                 .onSuccess {
-                                    snackbar.showSnackbar("已恢复到时间线")
+                                    snackbar.showSnackbar(recycleRestored)
                                     page = Page.Timeline
                                 }
                                 .onFailure(::report)
@@ -394,11 +435,11 @@ fun ImprintsApp(
                 is Page.Editor -> EditorPage(repository, current.id, revealEpoch + securityEpoch,
                     onSaved = { page = Page.Detail(it) },
                     onCancel = { page = Page.Timeline },
-                    onUnlock = { askPin("feeling-unlock", "解锁感受") },
+                    onUnlock = { askPin("feeling-unlock", pinUnlockFeeling) },
                     onBiometric = {
                         tryBiometric(
                             "feeling-unlock",
-                            onUnavailable = { askPin("feeling-unlock", "解锁感受") },
+                            onUnavailable = { askPin("feeling-unlock", pinUnlockFeeling) },
                         )
                     },
                     report = ::report)
@@ -418,31 +459,31 @@ fun ImprintsApp(
                 runCatching {
                     when (action) {
                         "feeling-enable" -> repository.exclusive { security.enableFeeling(pin) }
-                        "feeling-unlock" -> check(security.unlockFeelingPin(pin)) { "感受口令错误或暂时被限制" }
-                        "feeling-export", "feeling-import" -> check(security.unlockFeelingPin(pin)) { "感受口令错误或暂时被限制" }
-                        "feeling-disable" -> { check(security.unlockFeelingPin(pin)) { "感受口令错误或暂时被限制" }; repository.exclusive { security.disableFeeling() } }
+                        "feeling-unlock" -> check(security.unlockFeelingPin(pin)) { errFeelingPin }
+                        "feeling-export", "feeling-import" -> check(security.unlockFeelingPin(pin)) { errFeelingPin }
+                        "feeling-disable" -> { check(security.unlockFeelingPin(pin)) { errFeelingPin }; repository.exclusive { security.disableFeeling() } }
                         "feeling-bio" -> {
-                            check(security.unlockFeelingPin(pin)) { "感受口令错误或暂时被限制" }
+                            check(security.unlockFeelingPin(pin)) { errFeelingPin }
                             tryBiometric(
                                 "feeling-enable",
-                                onSuccess = { scope.launch { snackbar.showSnackbar("感受生物识别已开启") } },
+                                onSuccess = { scope.launch { snackbar.showSnackbar(bioFeelingEnabled) } },
                                 onUnavailable = {
                                     scope.launch {
-                                        snackbar.showSnackbar("指纹验证未弹出或未完成，感受生物识别未开启")
+                                        snackbar.showSnackbar(bioFeelingFailed)
                                     }
                                 },
                             )
                         }
                         "app-bio" -> {
-                            check(security.verifyAppLock(pin)) { "应用锁口令错误" }
+                            check(security.verifyAppLock(pin)) { errAppPin }
                             tryBiometric("app-enable",
-                                onSuccess = { scope.launch { snackbar.showSnackbar("应用锁生物识别已开启") } })
+                                onSuccess = { scope.launch { snackbar.showSnackbar(bioAppEnabled) } })
                         }
-                        "feeling-change-old" -> { check(security.unlockFeelingPin(pin)) { "感受口令错误或暂时被限制" }; askPin("feeling-change-new", "设置新的感受 6 位口令") }
+                        "feeling-change-old" -> { check(security.unlockFeelingPin(pin)) { errFeelingPin }; askPin("feeling-change-new", pinSetFeelingNew) }
                         "feeling-change-new" -> security.resetFeelingPin(pin)
                         "app-enable" -> { security.setAppLock(pin); refreshLockState() }
-                        "app-disable" -> { check(security.verifyAppLock(pin)) { "应用锁口令错误" }; security.disableAppLock(); refreshLockState() }
-                        "app-change-old" -> { check(security.verifyAppLock(pin)) { "应用锁口令错误" }; askPin("app-change-new", "设置新的应用锁 6 位口令") }
+                        "app-disable" -> { check(security.verifyAppLock(pin)) { errAppPin }; security.disableAppLock(); refreshLockState() }
+                        "app-change-old" -> { check(security.verifyAppLock(pin)) { errAppPin }; askPin("app-change-new", pinSetAppNew) }
                         "app-change-new" -> { security.setAppLock(pin); refreshLockState() }
                     }
                 }.onSuccess { securityEpoch++ }.onFailure { error ->
@@ -454,7 +495,7 @@ fun ImprintsApp(
         }
     }
     if (!locked) backupAction?.let { action ->
-        BackupPasswordDialog(if (action == "export") "设置备份口令" else "输入备份口令",
+        BackupPasswordDialog(if (action == "export") backupSetPassword else backupInputPassword,
             onDismiss = { backupAction = null; backupPassword = "" }) { password ->
             backupAction = null
             backupPassword = password
@@ -469,36 +510,45 @@ fun ImprintsApp(
     }
     if (!locked) backupPreview?.let { preview ->
         AlertDialog(onDismissRequest = { backupPreview = null; backupPassword = "" },
-            title = { Text("导入预览") },
+            title = { Text(stringResource(R.string.import_preview_title)) },
             text = { Text(buildString {
-                append("印迹 ${preview.entries} 条，附件 ${preview.attachments} 个；重复 ${preview.duplicates} 条，过期回收站 ${preview.expired} 条。")
-                append(" 待写入附件约 ${preview.attachmentBytes / (1024 * 1024)} MiB，导入期间需额外空间。")
-                if (preview.feelingMode == "ON" && feelingMode == "OFF") append(" 备份中的感受原为加密状态，导入本机后将以明文保存。")
+                append(
+                    stringResource(
+                        R.string.import_preview_main,
+                        preview.entries, preview.attachments, preview.duplicates, preview.expired,
+                    )
+                )
+                append(" ")
+                append(stringResource(R.string.import_preview_size, preview.attachmentBytes / (1024 * 1024)))
+                if (preview.feelingMode == "ON" && feelingMode == "OFF") {
+                    append(" ")
+                    append(stringResource(R.string.import_preview_plaintext_warning))
+                }
             }) },
             confirmButton = { TextButton(onClick = {
                 backupPreview = null
                 if (importUri != null) pendingImportPreview = preview
-            }) { Text(if (preview.feelingMode == "ON" && feelingMode == "OFF") "明文导入" else "导入") } },
-            dismissButton = { TextButton(onClick = { backupPreview = null; backupPassword = "" }) { Text("取消") } })
+            }) { Text(if (preview.feelingMode == "ON" && feelingMode == "OFF") stringResource(R.string.import_plain_confirm) else stringResource(R.string.action_import)) } },
+            dismissButton = { TextButton(onClick = { backupPreview = null; backupPassword = "" }) { Text(stringResource(R.string.action_cancel)) } })
     }
     if (!locked) confirmDelete?.let { id ->
-        AlertDialog(onDismissRequest = { confirmDelete = null }, title = { Text("立即彻底删除？") },
-            text = { Text("删除后无法恢复，正文、感受\n和全部附件都会被永久移除。") },
+        AlertDialog(onDismissRequest = { confirmDelete = null }, title = { Text(stringResource(R.string.delete_forever_title)) },
+            text = { Text(stringResource(R.string.delete_forever_message)) },
             confirmButton = { TextButton(onClick = {
                 confirmDelete = null
                 scope.launch { runCatching { repository.deletePermanently(id) }.onFailure(::report) }
-            }) { Text("立即删除") } },
-            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("取消") } })
+            }) { Text(stringResource(R.string.action_delete_now)) } },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text(stringResource(R.string.action_cancel)) } })
     }
     if (!locked && confirmDisableFeeling) AlertDialog(
         onDismissRequest = { confirmDisableFeeling = false },
-        title = { Text("关闭感受加密？") },
-        text = { Text("关闭后，已有和新写入的感受将以明文保存在本机。关闭前需验证感受口令。") },
+        title = { Text(stringResource(R.string.disable_feeling_title)) },
+        text = { Text(stringResource(R.string.disable_feeling_message)) },
         confirmButton = { TextButton(onClick = {
             confirmDisableFeeling = false
-            askPin("feeling-disable", "验证感受 6 位口令")
-        }) { Text("确认关闭") } },
-        dismissButton = { TextButton(onClick = { confirmDisableFeeling = false }) { Text("取消") } },
+            askPin("feeling-disable", pinVerifyFeeling6)
+        }) { Text(stringResource(R.string.disable_feeling_confirm)) } },
+        dismissButton = { TextButton(onClick = { confirmDisableFeeling = false }) { Text(stringResource(R.string.action_cancel)) } },
     )
     if (locked) {
         var lockError by remember(securityEpoch) { mutableStateOf<String?>(null) }
@@ -539,9 +589,9 @@ fun ImprintsApp(
                         unlocking = true
                         lockError = null
                         try {
-                            if (!unlockApp(pin)) lockError = "口令错误或暂时被限制，请重试"
+                            if (!unlockApp(pin)) lockError = errPinLocked
                         } catch (error: Exception) {
-                            lockError = error.message ?: "解锁失败，请重试"
+                            lockError = error.message ?: errUnlockFailed
                         } finally {
                             unlocking = false
                         }
@@ -577,7 +627,7 @@ private fun LockPage(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
     ) {
-        Text("印迹", color = Green, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.app_name), color = Green, fontSize = 30.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(36.dp))
         PinField(pin) { pin = it; }
         if (error != null) {
@@ -589,8 +639,8 @@ private fun LockPage(
             onClick = { val entered = pin; pin = ""; onPin(entered) },
             enabled = pin.length == 6 && !unlocking,
             modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (unlocking) "验证中…" else "解锁") }
-        if (biometricAvailable) TextButton(onClick = onBiometric) { Text("使用生物识别") }
+        ) { Text(if (unlocking) stringResource(R.string.state_verifying) else stringResource(R.string.action_unlock)) }
+        if (biometricAvailable) TextButton(onClick = onBiometric) { Text(stringResource(R.string.bio_use_biometric)) }
     }
 }
 
@@ -601,7 +651,7 @@ private fun PinField(value: String, onChange: (String) -> Unit) {
         val filtered = input.filter { it in '0'..'9' }.take(6)
         if (filtered != value) onChange(filtered)
     },
-        label = { Text("6 位数字口令") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+        label = { Text(stringResource(R.string.pin_label)) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
         singleLine = true, modifier = Modifier.fillMaxWidth(),
         shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
         colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green))
@@ -614,10 +664,10 @@ private fun PinDialog(title: String, setup: Boolean, onDismiss: () -> Unit, onCo
     AlertDialog(onDismissRequest = onDismiss, title = { Text(title) },
         text = { Column {
             PinField(pin) { pin = it }
-            if (setup) { Spacer(Modifier.height(12.dp)); PinField(confirm) { confirm = it }; Text("再次输入确认口令") }
+            if (setup) { Spacer(Modifier.height(12.dp)); PinField(confirm) { confirm = it }; Text(stringResource(R.string.pin_confirm_label)) }
         } },
-        confirmButton = { TextButton(onClick = { onConfirm(pin) }, enabled = pin.length == 6 && (!setup || pin == confirm)) { Text("确定") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        confirmButton = { TextButton(onClick = { onConfirm(pin) }, enabled = pin.length == 6 && (!setup || pin == confirm)) { Text(stringResource(R.string.action_confirm)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
         shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp), containerColor = Color.White)
 }
 
@@ -649,38 +699,38 @@ private fun SettingsPage(
         Modifier.fillMaxSize().padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        item { SettingsSectionLabel("隐私与安全") }
+        item { SettingsSectionLabel(stringResource(R.string.section_privacy_security)) }
         item {
             SettingsGroup {
                 // 立即锁定（对齐 Penly 安全组首位）：仅在应用锁已开启时出现，
                 // 否则锁上后没有口令可解，会把自己关在外面
                 if (appLock) {
                     SettingsRow(
-                        title = "立即锁定",
-                        subtitle = "清除会话，回到锁屏",
+                        title = stringResource(R.string.settings_lock_now),
+                        subtitle = stringResource(R.string.settings_lock_now_sub),
                         onClick = onLockNow,
                     )
                     FineDivider()
                 }
                 SettingsSwitchRow(
-                    title = "感受单独加密",
-                    subtitle = if (feelingMode == "ON") "已开启 · 查看前先验证，再刮开涂层"
-                    else "保存后绿涂层遮挡，浏览时刮开",
+                    title = stringResource(R.string.settings_feeling_encrypt),
+                    subtitle = if (feelingMode == "ON") stringResource(R.string.settings_feeling_on_sub)
+                    else stringResource(R.string.settings_feeling_off_sub),
                     checked = feelingMode == "ON",
                     onCheckedChange = { onFeeling() },
                 )
                 if (feelingMode == "ON") {
                     FineDivider()
                     SettingsRow(
-                        title = "修改感受口令",
-                        subtitle = "6 位数字",
+                        title = stringResource(R.string.settings_change_feeling_pin),
+                        subtitle = stringResource(R.string.settings_pin_digits),
                         onClick = onFeelingPinChange,
                         indent = true,
                     )
                     FineDivider()
                     SettingsSwitchRow(
-                        title = "感受生物识别",
-                        subtitle = if (feelingBio) "已开启 · 查看时优先指纹" else "用于查看加密感受",
+                        title = stringResource(R.string.settings_feeling_biometric),
+                        subtitle = if (feelingBio) stringResource(R.string.settings_feeling_bio_on_sub) else stringResource(R.string.settings_feeling_bio_off_sub),
                         checked = feelingBio,
                         onCheckedChange = { onFeelingBio() },
                         indent = true,
@@ -688,24 +738,24 @@ private fun SettingsPage(
                 }
                 FineDivider()
                 SettingsSwitchRow(
-                    title = "应用锁",
-                    subtitle = if (appLock) "已开启 · 每次重新进入应用都需验证"
-                    else "打开应用时验证 6 位口令",
+                    title = stringResource(R.string.settings_app_lock),
+                    subtitle = if (appLock) stringResource(R.string.settings_app_lock_on_sub)
+                    else stringResource(R.string.settings_app_lock_off_sub),
                     checked = appLock,
                     onCheckedChange = { onAppLock() },
                 )
                 if (appLock) {
                     FineDivider()
                     SettingsRow(
-                        title = "修改解锁密码",
-                        subtitle = "6 位数字",
+                        title = stringResource(R.string.settings_change_app_pin),
+                        subtitle = stringResource(R.string.settings_pin_digits),
                         onClick = onAppPinChange,
                         indent = true,
                     )
                     FineDivider()
                     SettingsSwitchRow(
-                        title = "应用锁生物识别",
-                        subtitle = if (appBio) "已开启 · 冷启动自动拉起指纹" else "用于解锁应用",
+                        title = stringResource(R.string.settings_app_biometric),
+                        subtitle = if (appBio) stringResource(R.string.settings_app_bio_on_sub) else stringResource(R.string.settings_app_bio_off_sub),
                         checked = appBio,
                         onCheckedChange = { onAppBio() },
                         indent = true,
@@ -713,8 +763,8 @@ private fun SettingsPage(
                 }
                 FineDivider()
                 SettingsSwitchRow(
-                    title = "防截屏与多任务保护",
-                    subtitle = "无法截屏/录屏，多任务不显示页面详情",
+                    title = stringResource(R.string.settings_secure_window),
+                    subtitle = stringResource(R.string.settings_secure_window_sub),
                     checked = secureWindow,
                     onCheckedChange = { value ->
                         secureWindow = value
@@ -725,40 +775,40 @@ private fun SettingsPage(
             }
         }
 
-        item { SettingsSectionLabel("数据") }
+        item { SettingsSectionLabel(stringResource(R.string.section_data)) }
         item {
             SettingsGroup {
-                SettingsRow("导出备份", "包含本机全部印迹和附件 · 需独立口令", onClick = onExport)
+                SettingsRow(stringResource(R.string.settings_export), stringResource(R.string.settings_export_sub), onClick = onExport)
                 FineDivider()
-                SettingsRow("导入备份", "先校验和预览，不覆盖现有数据", onClick = onImport)
+                SettingsRow(stringResource(R.string.settings_import), stringResource(R.string.settings_import_sub), onClick = onImport)
                 FineDivider()
-                SettingsRow("回收站", "删除的印迹保留 7 天", onClick = onRecycle)
+                SettingsRow(stringResource(R.string.settings_recycle), stringResource(R.string.settings_recycle_sub), onClick = onRecycle)
             }
         }
 
-        item { SettingsSectionLabel("关于") }
+        item { SettingsSectionLabel(stringResource(R.string.section_about)) }
         item {
             SettingsGroup {
                 SettingsRow(
-                    title = "版本",
-                    trailing = { Text("v$versionName", color = Quiet, fontSize = 13.sp) },
+                    title = stringResource(R.string.settings_version),
+                    trailing = { Text(stringResource(R.string.settings_version_value, versionName), color = Quiet, fontSize = 13.sp) },
                 )
                 FineDivider()
                 SettingsRow(
-                    title = "隐私政策",
-                    subtitle = "数据如何存储与保护",
+                    title = stringResource(R.string.settings_privacy_policy),
+                    subtitle = stringResource(R.string.settings_privacy_policy_sub),
                     onClick = onOpenPrivacyPolicy,
                 )
                 FineDivider()
                 SettingsRow(
-                    title = "用户协议",
-                    subtitle = "使用规则与责任范围",
+                    title = stringResource(R.string.settings_user_agreement),
+                    subtitle = stringResource(R.string.settings_user_agreement_sub),
                     onClick = onOpenUserAgreement,
                 )
                 FineDivider()
                 SettingsRow(
-                    title = "撤回同意",
-                    subtitle = "撤回后应用将退出，本机数据保留",
+                    title = stringResource(R.string.settings_revoke_consent),
+                    subtitle = stringResource(R.string.settings_revoke_consent_sub),
                     danger = true,
                     onClick = { confirmRevoke = true },
                 )
@@ -767,7 +817,7 @@ private fun SettingsPage(
 
         item {
             Text(
-                "不有佳咏，何伸雅怀？",
+                stringResource(R.string.settings_motto),
                 Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 20.dp),
                 color = Green,
                 fontSize = 12.sp,
@@ -780,22 +830,21 @@ private fun SettingsPage(
     if (confirmRevoke) {
         AlertDialog(
             onDismissRequest = { confirmRevoke = false },
-            title = { Text("撤回隐私政策同意", color = Ink) },
+            title = { Text(stringResource(R.string.settings_revoke_title), color = Ink) },
             text = {
                 Text(
-                    "撤回后将退出应用，下次启动需重新同意。\n\n" +
-                        "你的印迹不会被删除，仍然完整保留在本机。",
+                    stringResource(R.string.settings_revoke_message),
                     color = Ink, fontSize = 14.sp, lineHeight = 21.sp,
                 )
             },
             confirmButton = {
                 TextButton(onClick = { confirmRevoke = false; onRevokeConsent() }) {
-                    Text("确认撤回", color = Danger, fontSize = 15.sp)
+                    Text(stringResource(R.string.settings_revoke_confirm), color = Danger, fontSize = 15.sp)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { confirmRevoke = false }) {
-                    Text("取消", color = Quiet, fontSize = 15.sp)
+                    Text(stringResource(R.string.action_cancel), color = Quiet, fontSize = 15.sp)
                 }
             },
             shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp),
@@ -808,12 +857,12 @@ private fun SettingsPage(
 private fun BackupPasswordDialog(title: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var password by remember(title) { mutableStateOf("") }
     AlertDialog(onDismissRequest = onDismiss, title = { Text(title) },
-        text = { OutlinedTextField(password, { password = it }, label = { Text("至少 8 位") },
+        text = { OutlinedTextField(password, { password = it }, label = { Text(stringResource(R.string.backup_password_hint)) },
             visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
             shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
             colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green)) },
-        confirmButton = { TextButton(onClick = { onConfirm(password) }, enabled = password.length >= 8) { Text("继续") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        confirmButton = { TextButton(onClick = { onConfirm(password) }, enabled = password.length >= 8) { Text(stringResource(R.string.action_continue)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
         shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp), containerColor = Color.White)
 }
 
@@ -822,31 +871,31 @@ private fun RecyclePage(entries: List<EntryEntity>, onOpen: (String) -> Unit,
     onRestore: (String) -> Unit, onDelete: (String) -> Unit) {
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item { OutlinePanel(Modifier.fillMaxWidth()) {
-            Text("删除的印迹会在这里保留 7 天，之后自动清除。", Modifier.padding(18.dp),
+            Text(stringResource(R.string.recycle_intro), Modifier.padding(18.dp),
                 color = Quiet, fontSize = 14.sp, lineHeight = 22.sp)
         } }
-        item { Text("${entries.size} 条印迹", Modifier.padding(top = 10.dp), color = Quiet, fontSize = 14.sp) }
+        item { Text(stringResource(R.string.recycle_count, entries.size), Modifier.padding(top = 10.dp), color = Quiet, fontSize = 14.sp) }
         if (entries.isEmpty()) {
-            item { Text("回收站是空的", Modifier.fillMaxWidth().padding(top = 48.dp),
+            item { Text(stringResource(R.string.recycle_empty), Modifier.fillMaxWidth().padding(top = 48.dp),
                 color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
-            item { Text("移入的印迹会在这里保留 7 天。", Modifier.fillMaxWidth(),
+            item { Text(stringResource(R.string.recycle_entry_sub), Modifier.fillMaxWidth(),
                 color = Quiet, fontSize = 13.sp,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
         }
         items(entries, key = { it.id }) { entry ->
             OutlinePanel(Modifier.fillMaxWidth().clickable { onOpen(entry.id) }) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                 Text(entry.eventLocalMinute.replace('T', ' '), color = Quiet, fontSize = 12.sp)
-                Text(entry.body.ifBlank { "媒体印迹" }, color = Ink, fontSize = 16.sp, maxLines = 3)
+                Text(entry.body.ifBlank { stringResource(R.string.entry_media_only) }, color = Ink, fontSize = 16.sp, maxLines = 3)
                 Text(entry.deletedAtMs?.let(::RecycleCountdown) ?: "", color = Quiet, fontSize = 12.sp)
-                Text("到期后自动彻底删除", color = Quiet, fontSize = 11.sp)
+                Text(stringResource(R.string.recycle_expiry), color = Quiet, fontSize = 11.sp)
                 FineDivider()
-                Row { TextButton(onClick = { onRestore(entry.id) }) { Text("恢复", color = Green) }
-                    TextButton(onClick = { onDelete(entry.id) }) { Text("彻底删除", color = Quiet) } }
+                Row { TextButton(onClick = { onRestore(entry.id) }) { Text(stringResource(R.string.action_restore), color = Green) }
+                    TextButton(onClick = { onDelete(entry.id) }) { Text(stringResource(R.string.action_delete_forever), color = Quiet) } }
             } }
         }
         if (entries.isNotEmpty()) item {
-            Text("按移入时间排列；点按查看详情，可恢复或彻底删除。",
+            Text(stringResource(R.string.recycle_hint),
                 Modifier.fillMaxWidth().padding(vertical = 24.dp),
                 color = Quiet, fontSize = 12.sp,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center)
@@ -868,7 +917,7 @@ private fun SearchPage(repository: ImprintRepository, onOpen: (String) -> Unit,
         focusRequester.requestFocus()
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
-        OutlinedTextField(query, { query = it }, placeholder = { Text("搜索印迹正文") },
+        OutlinedTextField(query, { query = it }, placeholder = { Text(stringResource(R.string.search_hint)) },
             modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
             singleLine = true,
             shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
@@ -879,19 +928,19 @@ private fun SearchPage(repository: ImprintRepository, onOpen: (String) -> Unit,
             horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("想找回哪一刻？", color = Ink, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
-            Text("搜索你写过的事情。", color = Quiet, fontSize = 13.sp)
+            Text(stringResource(R.string.search_title), color = Ink, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.search_sub), color = Quiet, fontSize = 13.sp)
         }
         if (query.isNotBlank() && results.isEmpty()) Column(
             Modifier.fillMaxWidth().padding(top = 44.dp),
             horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text("没有找到相关印迹", color = Ink, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
-            Text("换一个词，试试事情的写法。", color = Quiet, fontSize = 13.sp)
+            Text(stringResource(R.string.search_empty), color = Ink, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.search_empty_sub), color = Quiet, fontSize = 13.sp)
         }
         if (query.isNotBlank() && results.isNotEmpty()) {
-            Text("找到 ${results.size} 条印迹", color = Quiet, fontSize = 13.sp)
+            Text(stringResource(R.string.search_result_count, results.size), color = Quiet, fontSize = 13.sp)
         }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) { items(results, key = { it.id }) { entry ->
             Column(Modifier.fillMaxWidth().clickable { onOpen(entry.id) }.padding(vertical = 12.dp),
@@ -904,8 +953,16 @@ private fun SearchPage(repository: ImprintRepository, onOpen: (String) -> Unit,
     }
 }
 
-private fun formatSearchDate(minute: String): String = runCatching {
-    val date = java.time.LocalDate.parse(minute.take(10))
-    val weekday = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")[date.dayOfWeek.value - 1]
-    "${date.monthValue}月${date.dayOfMonth}日 · $weekday"
-}.getOrElse { minute.replace('T', ' ') }
+/** 搜索结果里的日期标签。@Composable 以便读取本地化格式。 */
+@Composable
+private fun formatSearchDate(minute: String): String {
+    val weekdayNames = weekdayNames()
+    // 只包住解析：stringResource 在 runCatching 外，避免资源读取异常被 getOrElse
+    // 吞掉后伪装成"格式化成功"（那会让缺资源表现为一条裸日期，很难排查）
+    val date = runCatching { java.time.LocalDate.parse(minute.take(10)) }.getOrNull()
+        ?: return minute.replace('T', ' ')
+    return stringResource(
+        R.string.format_date_md_weekday,
+        date.monthValue, date.dayOfMonth, weekdayNames[date.dayOfWeek.value - 1],
+    )
+}

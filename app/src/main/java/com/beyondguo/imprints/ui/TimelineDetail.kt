@@ -32,7 +32,6 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.MaterialTheme
@@ -84,6 +83,9 @@ import java.time.LocalDateTime
 import java.time.YearMonth
 import java.time.Instant
 import java.time.ZoneId
+import com.beyondguo.imprints.R
+import androidx.compose.ui.res.stringResource
+import kotlin.time.Duration.Companion.milliseconds
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -162,16 +164,16 @@ fun TimelinePage(
             Column(Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 28.dp, bottom = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("我的印迹", Modifier.weight(1f), color = Ink, fontSize = 34.sp, fontWeight = FontWeight.Bold)
-                    IconButton(onClick = onSettings) { Icon(Icons.Default.MoreVert, "设置", tint = Quiet) }
+                    Text(stringResource(R.string.timeline_title), Modifier.weight(1f), color = Ink, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+                    IconButton(onClick = onSettings) { Icon(Icons.Default.MoreVert, stringResource(R.string.a11y_settings), tint = Quiet) }
                 }
             }
         }
         if (entries.isEmpty()) item {
             Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 56.dp),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("留下你的第一条印迹", color = Ink, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
-                Text("经历、见闻，或某一刻的感受。", color = Quiet, fontSize = 14.sp)
+                Text(stringResource(R.string.timeline_empty_title), color = Ink, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.timeline_empty_sub), color = Quiet, fontSize = 14.sp)
             }
         }
         var previousMonth = ""
@@ -201,13 +203,13 @@ fun TimelinePage(
                             onClick = onSearch,
                             modifier = Modifier.size(40.dp),
                         ) {
-                            Icon(Icons.Default.Search, "搜索", tint = Quiet, modifier = Modifier.size(20.dp))
+                            Icon(Icons.Default.Search, stringResource(R.string.a11y_search), tint = Quiet, modifier = Modifier.size(20.dp))
                         }
                         IconButton(
                             onClick = { showTimeTravel = true },
                             modifier = Modifier.size(40.dp),
                         ) {
-                            Icon(Icons.Default.DateRange, "按时间定位", tint = Quiet, modifier = Modifier.size(20.dp))
+                            Icon(Icons.Default.DateRange, stringResource(R.string.timetravel_title), tint = Quiet, modifier = Modifier.size(20.dp))
                         }
                     }
                 }
@@ -224,8 +226,11 @@ fun TimelinePage(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(entry.eventLocalMinute.substring(8, 10), color = Ink, fontSize = 30.sp, fontWeight = FontWeight.Bold)
                             val date = runCatching { LocalDate.parse(entry.eventLocalMinute.take(10)) }.getOrNull()
-                            val weekday = date?.dayOfWeek?.value?.let { listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")[it - 1] }.orEmpty()
-                            Text("$weekday · ${entry.eventLocalMinute.takeLast(5)}", color = Quiet, fontSize = 13.sp)
+                            val weekday = date?.dayOfWeek?.value?.let { weekdayNames()[it - 1] }.orEmpty()
+                            Text(
+                                stringResource(R.string.detail_time_meta, weekday, entry.eventLocalMinute.takeLast(5)),
+                                color = Quiet, fontSize = 13.sp,
+                            )
                             // 设计 16：位置跟在时间后同一行
                             details[entry.id]?.place?.let { place ->
                                 Row(
@@ -262,14 +267,14 @@ fun TimelinePage(
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         Text(
-                                            "收起",
+                                            stringResource(R.string.action_collapse),
                                             color = Green,
                                             fontSize = 14.sp,
                                             fontWeight = FontWeight.Medium,
                                         )
                                         Icon(
                                             Icons.Default.KeyboardArrowUp,
-                                            contentDescription = "收起正文",
+                                            contentDescription = stringResource(R.string.a11y_collapse_body),
                                             tint = Green,
                                             modifier = Modifier.size(16.dp),
                                         )
@@ -299,14 +304,14 @@ fun TimelinePage(
                                             verticalAlignment = Alignment.CenterVertically,
                                         ) {
                                             Text(
-                                                "展开",
+                                                stringResource(R.string.action_expand),
                                                 color = Green,
                                                 fontSize = 14.sp,
                                                 fontWeight = FontWeight.Medium,
                                             )
                                             Icon(
                                                 Icons.Default.KeyboardArrowDown,
-                                                contentDescription = "展开正文",
+                                                contentDescription = stringResource(R.string.a11y_expand_body),
                                                 tint = Green,
                                                 modifier = Modifier.size(16.dp),
                                             )
@@ -353,7 +358,7 @@ fun TimelinePage(
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Icon(
                     Icons.Default.KeyboardArrowUp,
-                    contentDescription = "回到顶部",
+                    contentDescription = stringResource(R.string.a11y_back_to_top),
                     tint = Quiet,
                     modifier = Modifier.size(24.dp),
                 )
@@ -363,9 +368,13 @@ fun TimelinePage(
     }
 }
 
-private fun displayMonth(value: String): String = runCatching {
-    YearMonth.parse(value).let { "${it.year}年${it.monthValue}月" }
-}.getOrElse { value }
+/** 时间线分组标题的月份标签。@Composable 以便读取本地化格式。 */
+@Composable
+private fun displayMonth(value: String): String {
+    // 只包住解析，stringResource 放在外面（理由见 formatSearchDate）
+    val month = runCatching { YearMonth.parse(value) }.getOrNull() ?: return value
+    return stringResource(R.string.timetravel_month_full, month.year, month.monthValue)
+}
 
 @Composable
 fun DetailPage(
@@ -378,22 +387,27 @@ fun DetailPage(
     var confirmRecycle by remember(id) { mutableStateOf(false) }
     LaunchedEffect(id, epoch) { detail = repository.detail(id) }
     val value = detail
-    if (value == null) { Text("正在加载…", Modifier.padding(20.dp)); return }
+    if (value == null) { Text(stringResource(R.string.state_loading), Modifier.padding(20.dp)); return }
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 22.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         item { Column(Modifier.padding(top = 22.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             val date = value.entry.eventLocalMinute
-            val dateLabel = runCatching {
-                val d = LocalDateTime.parse(date)
-                val weekday = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")[d.dayOfWeek.value - 1]
-                "${d.year}年${d.monthValue}月${d.dayOfMonth}日 · $weekday"
-            }.getOrElse { date.take(10) }
+            // 只包住解析，stringResource 放在外面（理由见 formatSearchDate）
+            val parsed = runCatching { LocalDateTime.parse(date) }.getOrNull()
+            val dateLabel = if (parsed == null) date.take(10) else {
+                val weekdayNames = weekdayNames()
+                stringResource(
+                    R.string.format_ymd_weekday,
+                    parsed.year, parsed.monthValue, parsed.dayOfMonth,
+                    weekdayNames[parsed.dayOfWeek.value - 1],
+                )
+            }
             Text(dateLabel, color = Ink, fontSize = 30.sp, fontWeight = FontWeight.Bold)
             Text(date.takeLast(5), color = Quiet, fontSize = 14.sp)
         } }
         if (value.entry.body.isNotBlank()) item { Text(value.entry.body, color = Ink, fontSize = 18.sp, lineHeight = 30.sp) }
         value.place?.let { place -> item {
             // 设计 49：先进入位置详情，再选择导航
-            Text("⌖  ${place.name}", Modifier.clickable { onOpenPlace(place) }, color = Green, fontSize = 14.sp)
+            Text(stringResource(R.string.detail_place_meta, place.name), Modifier.clickable { onOpenPlace(place) }, color = Green, fontSize = 14.sp)
         } }
         if (value.visuals.isNotEmpty()) item {
             // 约束媒体区高度，避免与下方音频/感受重叠
@@ -415,38 +429,50 @@ fun DetailPage(
         item { Text(formatUpdatedAt(value.entry.updatedAtMs), color = Quiet, fontSize = 12.sp) }
         if (recycleActions != null) {
             item { Text(
-                (value.entry.deletedAtMs?.let { RecycleCountdown(it) } ?: "") + "\n到期后自动彻底删除",
+                (value.entry.deletedAtMs?.let { RecycleCountdown(it) } ?: "") + "\n" + stringResource(R.string.recycle_auto_delete),
                 color = Quiet, fontSize = 13.sp, lineHeight = 20.sp,
             ) }
             item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Button(onClick = recycleActions, shape = RoundedCornerShape(12.dp)) { Text("恢复印迹") }
-                TextButton(onClick = { confirmRecycle = true }) { Text("立即彻底删除", color = Quiet) }
+                Button(onClick = recycleActions, shape = RoundedCornerShape(12.dp)) { Text(stringResource(R.string.detail_restore)) }
+                TextButton(onClick = { confirmRecycle = true }) { Text(stringResource(R.string.detail_delete_now), color = Quiet) }
             } }
         } else {
             // 编辑已移到顶栏右上角（设计 41）；底部仅保留移入回收站
             item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = { confirmRecycle = true }) { Text("移入回收站", color = Quiet) }
+                TextButton(onClick = { confirmRecycle = true }) { Text(stringResource(R.string.detail_move_to_recycle), color = Quiet) }
             } }
         }
         item { Spacer(Modifier.height(32.dp)) }
     }
     if (confirmRecycle && !LocalImprintsLocked.current) AlertDialog(onDismissRequest = { confirmRecycle = false },
-        title = { Text(if (recycleActions != null) "立即彻底删除？" else "移入回收站？") },
-        text = { if (recycleActions != null) Text("删除后无法恢复，正文、感受\n和全部附件都会被永久移除。")
-            else Text("移入后可在 7 天内恢复。\n到期后将自动彻底删除。") },
+        title = { Text(if (recycleActions != null) stringResource(R.string.delete_forever_title) else stringResource(R.string.detail_recycle_confirm_title)) },
+        text = { if (recycleActions != null) Text(stringResource(R.string.delete_forever_message))
+            else Text(stringResource(R.string.detail_move_to_recycle_message)) },
         confirmButton = { TextButton(onClick = { confirmRecycle = false; onDelete() }) {
-            Text(if (recycleActions != null) "立即删除" else "移入回收站") } },
-        dismissButton = { TextButton(onClick = { confirmRecycle = false }) { Text("取消") } })
+            Text(if (recycleActions != null) stringResource(R.string.action_delete_now) else stringResource(R.string.detail_move_to_recycle)) } },
+        dismissButton = { TextButton(onClick = { confirmRecycle = false }) { Text(stringResource(R.string.action_cancel)) } })
 }
 
+/** 时间戳文案。@Composable 以便读取本地化的日期格式。 */
+@Composable
 private fun formatRecordedAt(timestamp: Long): String = Instant.ofEpochMilli(timestamp)
     .atZone(ZoneId.systemDefault()).let {
-        "记录于 ${it.monthValue}月${it.dayOfMonth}日 %02d:%02d".format(it.hour, it.minute)
+        stringResource(
+            R.string.detail_recorded_at,
+            stringResource(R.string.format_date_md, it.monthValue, it.dayOfMonth),
+            it.hour, it.minute,
+        )
     }
 
+/** 时间戳文案。@Composable 以便读取本地化的日期格式。 */
+@Composable
 private fun formatUpdatedAt(timestamp: Long): String = Instant.ofEpochMilli(timestamp)
     .atZone(ZoneId.systemDefault()).let {
-        "更新于 ${it.monthValue}月${it.dayOfMonth}日 %02d:%02d".format(it.hour, it.minute)
+        stringResource(
+            R.string.detail_updated_at,
+            stringResource(R.string.format_date_md, it.monthValue, it.dayOfMonth),
+            it.hour, it.minute,
+        )
     }
 
 @Composable
@@ -512,12 +538,12 @@ fun FeelingCard(
             Canvas(Modifier.matchParentSize()) {
                 drawRect(Green)
                 val stripe = Color.White.copy(alpha = 0.14f)
-                var x = -size.height.toFloat()
+                var x = -size.height
                 while (x < size.width + size.height) {
                     drawLine(
                         stripe,
                         Offset(x, 0f),
-                        Offset(x + size.height, size.height.toFloat()),
+                        Offset(x + size.height, size.height),
                         strokeWidth = 3.dp.toPx(),
                     )
                     x += 9.dp.toPx()
@@ -592,7 +618,7 @@ private fun ScratchFeeling(text: String, epoch: Int, feelingId: String) {
         mutableStateOf(false)
     }
     LaunchedEffect(showStars) {
-        if (showStars) { delay(1100); showStars = false }
+        if (showStars) { delay(1100.milliseconds); showStars = false }
     }
     val cellPx = with(LocalDensity.current) { 16.dp.toPx() }
     val eraseRadius = with(LocalDensity.current) { 15.dp.toPx() }

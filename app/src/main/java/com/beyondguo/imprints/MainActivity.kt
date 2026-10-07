@@ -282,16 +282,19 @@ class MainActivity : FragmentActivity() {
                         onUnavailable()
                     }
                 })
-            val promptTitle = when (target) {
-                "feeling-unlock" -> "验证感受"
-                "feeling-enable" -> "开启感受生物识别"
-                "app-enable" -> "开启应用锁生物识别"
-                else -> "解锁印迹"
-            }
+            // 非 @Composable 上下文，用 getString 而非 stringResource
+            val promptTitle = getString(
+                when (target) {
+                    "feeling-unlock" -> R.string.bio_title_feeling_unlock
+                    "feeling-enable" -> R.string.bio_title_feeling_enable
+                    "app-enable" -> R.string.bio_title_app_enable
+                    else -> R.string.bio_title_app_unlock
+                }
+            )
             val info = BiometricPrompt.PromptInfo.Builder()
                 .setTitle(promptTitle)
                 .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
-                .setNegativeButtonText("使用 6 位口令")
+                .setNegativeButtonText(getString(R.string.bio_use_pin_fallback))
                 .build()
             android.util.Log.i("ImprintsBio", "authenticate target=$target withCrypto=${cipher != null}")
             biometricPromptActive = true

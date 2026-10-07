@@ -38,6 +38,9 @@ import androidx.compose.ui.unit.sp
 import com.beyondguo.imprints.data.EntryEntity
 import com.beyondguo.imprints.data.PlaceEntity
 import com.beyondguo.imprints.location.Wgs84GCJ02
+import com.beyondguo.imprints.R
+import androidx.compose.ui.res.stringResource
+import androidx.core.net.toUri
 
 /**
  * 位置详情页（设计 49/50）：
@@ -51,10 +54,12 @@ fun LocationDetailPage(
     onOpenEntry: (String) -> Unit,
 ) {
     val context = LocalContext.current
+    // Toast 在 onClick lambda 里弹（捕获），文案提前取一次避免在回调里查资源
+    val noMapAppHint = stringResource(R.string.err_no_map_app)
     BackHandler { onBack() }
     val coordinates = if (place.latitude != null && place.longitude != null) {
         val (wgsLat, wgsLng) = Wgs84GCJ02.toWgs84(
-            place.latitude!!, place.longitude!!, place.coordinateSystem)
+            place.latitude, place.longitude, place.coordinateSystem)
         "$wgsLat,$wgsLng"
     } else null
 
@@ -67,9 +72,9 @@ fun LocationDetailPage(
             // 有坐标：嵌高德真地图（可缩放平移）；无坐标：静态示意 + 点按交给外部地图
             val latLng = if (place.latitude != null && place.longitude != null) {
                 if (place.coordinateSystem.equals("GCJ-02", ignoreCase = true)) {
-                    place.latitude!! to place.longitude!!
+                    place.latitude to place.longitude
                 } else {
-                    Wgs84GCJ02.toGcj02(place.latitude!!, place.longitude!!)
+                    Wgs84GCJ02.toGcj02(place.latitude, place.longitude)
                 }
             } else null
             Box(
@@ -80,9 +85,10 @@ fun LocationDetailPage(
                     .background(Color(0xFFF0F3F1))
                     .clickable(enabled = latLng == null && coordinates != null) {
                         runCatching {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=$coordinates")))
+                            context.startActivity(Intent(Intent.ACTION_VIEW,
+                                "geo:0,0?q=$coordinates".toUri()))
                         }.onFailure {
-                            Toast.makeText(context, "未找到可用的地图应用", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, noMapAppHint, Toast.LENGTH_SHORT).show()
                         }
                     },
                 contentAlignment = Alignment.Center,
@@ -129,30 +135,31 @@ fun LocationDetailPage(
                         // 无坐标时按名称搜索
                         runCatching {
                             context.startActivity(Intent(Intent.ACTION_VIEW,
-                                Uri.parse("geo:0,0?q=${Uri.encode(place.name)}")))
+                                "geo:0,0?q=${Uri.encode(place.name)}".toUri()))
                         }.onFailure {
-                            Toast.makeText(context, "未找到可用的地图应用", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, noMapAppHint, Toast.LENGTH_SHORT).show()
                         }
                     } else {
                         runCatching {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=$coordinates")))
+                            context.startActivity(Intent(Intent.ACTION_VIEW,
+                                "geo:0,0?q=$coordinates".toUri()))
                         }.onFailure {
-                            Toast.makeText(context, "未找到可用的地图应用", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, noMapAppHint, Toast.LENGTH_SHORT).show()
                         }
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(14.dp),
-            ) { Text("导航去此处") }
-            Text("导航将交给已安装的地图应用", color = Quiet, fontSize = 12.sp)
+            ) { Text(stringResource(R.string.location_navigate)) }
+            Text(stringResource(R.string.location_navigate_sub), color = Quiet, fontSize = 12.sp)
         }
         item {
-            Text("相关印迹", color = Quiet, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+            Text(stringResource(R.string.location_related), color = Quiet, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(top = 8.dp))
         }
         if (relatedEntries.isEmpty()) {
             item {
-                Text("这个位置还没有印迹", color = Ink, fontSize = 15.sp,
+                Text(stringResource(R.string.location_empty), color = Ink, fontSize = 15.sp,
                     modifier = Modifier.padding(vertical = 24.dp))
             }
         } else {
@@ -160,7 +167,7 @@ fun LocationDetailPage(
                 OutlinePanel(Modifier.fillMaxWidth().clickable { onOpenEntry(entry.id) }) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(entry.eventLocalMinute.replace('T', ' '), color = Quiet, fontSize = 12.sp)
-                        Text(entry.body.ifBlank { "媒体印迹" }, color = Ink, fontSize = 15.sp,
+                        Text(entry.body.ifBlank { stringResource(R.string.entry_media_only) }, color = Ink, fontSize = 15.sp,
                             maxLines = 3, lineHeight = 22.sp)
                     }
                 }

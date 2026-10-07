@@ -48,6 +48,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.beyondguo.imprints.privacy.ConsentState
 import androidx.compose.ui.platform.LocalContext
+import com.beyondguo.imprints.R
+import androidx.compose.ui.res.stringResource
 
 /** 协议正文页：可从首次弹窗进入，也可从设置「关于」进入。 */
 @Composable
@@ -70,7 +72,7 @@ internal fun PolicyDocumentPage(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", tint = Ink)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back), tint = Ink)
             }
             Text(title, color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
         }
@@ -109,11 +111,11 @@ internal fun ConsentDialog(
     var showAgreement by remember { mutableStateOf(false) }
 
     if (showPolicy) {
-        PolicyDocumentPage("隐私政策", "privacy_policy.txt", onBack = { showPolicy = false })
+        PolicyDocumentPage(stringResource(R.string.settings_privacy_policy), "privacy_policy.txt", onBack = { showPolicy = false })
         return
     }
     if (showAgreement) {
-        PolicyDocumentPage("用户协议", "user_agreement.txt", onBack = { showAgreement = false })
+        PolicyDocumentPage(stringResource(R.string.settings_user_agreement), "user_agreement.txt", onBack = { showAgreement = false })
         return
     }
 
@@ -129,7 +131,7 @@ internal fun ConsentDialog(
         ) {
             Column(Modifier.padding(horizontal = 20.dp, vertical = 22.dp)) {
                 Text(
-                    "个人信息保护指引",
+                    stringResource(R.string.consent_title),
                     Modifier.fillMaxWidth(),
                     color = Ink, fontSize = 18.sp, lineHeight = 24.sp,
                     fontWeight = FontWeight.Bold, textAlign = TextAlign.Center,
@@ -139,11 +141,10 @@ internal fun ConsentDialog(
                 // 拆成两段会读成两条并列事实，还多出一个段距。链接内嵌随文流排版。
                 Text(
                     text = buildAnnotatedString {
-                        append("印迹只把记录存在你自己的手机上，不注册、不登录、不上传，我们不会收集你的个人信息。" +
-                            "唯一需要联网的是你主动添加地点时 —— 印迹会请求位置权限并向高德服务查询附近地名，你可以拒绝，不影响其他功能。详情见")
-                        policyLink("《隐私政策》", onClick = { showPolicy = true })
-                        append("与")
-                        policyLink("《用户协议》", onClick = { showAgreement = true })
+                        append(stringResource(R.string.consent_body))
+                        policyLink(stringResource(R.string.consent_link_privacy), onClick = { showPolicy = true })
+                        append(stringResource(R.string.consent_link_and))
+                        policyLink(stringResource(R.string.consent_link_agreement), onClick = { showAgreement = true })
                         append("。")
                     },
                     color = Ink, fontSize = 14.sp, lineHeight = 22.sp,
@@ -164,7 +165,7 @@ internal fun ConsentDialog(
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Ink),
                             contentPadding = PaddingValues(horizontal = 4.dp),
                         ) {
-                            Text("不同意", fontSize = 15.sp, maxLines = 1)
+                            Text(stringResource(R.string.consent_disagree), fontSize = 15.sp, maxLines = 1)
                         }
                     }
                     Box(Modifier.weight(1f)) {
@@ -175,7 +176,7 @@ internal fun ConsentDialog(
                             colors = ButtonDefaults.buttonColors(containerColor = Green, contentColor = Color.White),
                             contentPadding = PaddingValues(horizontal = 4.dp),
                         ) {
-                            Text("同意并继续", fontSize = 15.sp, maxLines = 1)
+                            Text(stringResource(R.string.consent_agree), fontSize = 15.sp, maxLines = 1)
                         }
                     }
                 }
