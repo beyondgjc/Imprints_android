@@ -35,25 +35,38 @@ app/src/main/java/com/beyondguo/imprints/
 └── ui/                    # Compose：时间线、详情、编辑、搜索、设置、回收站、刮卡、时间穿梭
 ```
 
-## 当前验证状态（2026-10-05 更新）
+## 当前验证状态（2026-10-07 更新）
 
-- Gradle 标准构建 `.\gradlew.bat :app:assembleDebug :app:testDebugUnitTest` **BUILD SUCCESSFUL**（Android Studio JBR 21 本机实测）。
-- JVM 单元测试共 **29** 项全部通过（备份帧/头、EntryRules、MediaKindDetector、PinPolicy、TimelineLocator、Wgs84GCJ02 等）。
-- 当前版本 **1.2（versionCode 3）**；release APK 最近一次构建于 2026-09-24，此后合入的 UI 优化提交**尚未重打 release**。
+- Gradle 标准构建 `.\gradlew.bat :app:assembleDebug :app:testDebugUnitTest` **BUILD SUCCESSFUL**（Android Studio JBR 21）。
+- JVM 单元测试 **29** 项通过（备份帧/头、EntryRules、MediaKindDetector、PinPolicy、TimelineLocator、Wgs84GCJ02 等）。
+- 当前版本 **1.4（versionCode 5）**；见下方 Release 1.4。
 - Git：独立仓；远端 **GitHub 私有** `beyondgjc/Imprints_android`。勿提交 `local.properties` / keystore / 口令。
-- 真机冒烟：本日未系统复测；加密、备份、回收站、生物识别等主路径以设备实测为准。
-- 高德 Key 在本机 `local.properties`（勿提交）。POI/附近在 Key 与接入条件具备前保持可用性验证。
-
-### 近期迭代摘要（2026-09-23 ～ 09-25，已编码+构建）
-
-- **1.0 签名发布**、**R8 混淆优化**（`mapping.txt` 必备份）、图标定稿（绿底白卡刮痕 + 右下金星）
-- **刮卡**：真实局部刮开、80% 面积全开金闪、无全开按钮、同 epoch 保持敞开
-- **时间线**：搜索在吸顶栏、↑ 回到顶部、单图靠左/双图 2 列、位置与时间同行
-- **详情**顶栏右上「编辑」；**编辑页**无媒体分区标题、音乐与位置行布局、键盘 IME 动态适配
-- **设置页**分组卡改版（对齐 Penly）、防截屏与多任务单开关、生物识别失败提示与开启前口令校验
-- bug 批次 T13–T21（编码+构建过，逐条设备冒烟未做）
+- 高德 Key 在本机 `local.properties`（勿提交）。地图/POI 使用 `3dmap-location-search`（MAP so **16KB 对齐**）。
+- 真机：MI 8 实测选图回锁、系统录音机、生物识别弹窗、位置详情地图；加密/备份等以设备冒烟为准。
 
 ## Release 历史
+
+### Release 1.4（2026-10-07）
+
+- `versionName=1.4`，`versionCode=5`
+- **位置详情真地图**：高德 `MapView` 预览，缩放/平移；无坐标仍用示意占位
+- **16KB 设备兼容**：`com.amap.api:3dmap-location-search:11.3.100_loc11.3.000_sea9.8.1`  
+  （`libAMapSDK_MAP_v11_3_100.so` LOAD=16384；单独 `3dmap`≤10.0.600 仍为 4KB，已弃用）
+- **添加声音**：来源弹层（从文件 / **系统录音机**）；仅已选中时显示「移除声音」；播完再点从头播放
+- **生物识别**：MIUI `canAuthenticate=-1` 不再误判不可用；冷启动已开应用锁指纹则自动拉起；指纹注册期间 `onStop` 不清感受会话
+- **选图/系统页回锁修复**：临时跳系统 Activity 期间不上锁、不清会话
+- **设置页**：感受加密/应用锁开关 + 缩进子项；分组卡密度对齐 Penly
+- 隐私政策、权限永久拒绝引导、文案整理
+- CI：GitHub Actions（构建 + 单测 + lint）
+- R8：`mapping.txt` → `app/build/outputs/mapping/release/`（**必备份**）
+- 构建：`.\gradlew.bat :app:assembleRelease` → `app/build/outputs/apk/release/app-release.apk`
+- 包名：`com.beyondguo.imprints`；Release SHA1 与 1.2 相同（keystore 未变）  
+  `7E:39:92:0D:8E:C5:14:95:4B:70:72:4A:78:48:64:0D:49:9D:E8:BB`
+- GitHub：`https://github.com/beyondgjc/Imprints_android/releases/tag/v1.4`
+
+### Release 1.3
+
+- `versionName=1.3`，`versionCode=4`；tag `v1.3`（`git log v1.2..v1.3`）
 
 ### Release 1.2（2026-09-24）
 

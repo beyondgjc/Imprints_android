@@ -15,13 +15,20 @@
 -keep class com.beyondguo.penly.crypto.** { *; }
 -dontwarn com.beyondguo.penly.crypto.**
 
-# ---- 高德 Search ----
+# ---- 高德 Map+Search+Location（3dmap-location-search 聚合包） ----
 -keep class com.amap.api.** { *; }
 -keep class com.amap.api.services.** { *; }
+-keep class com.autonavi.** { *; }
+-keep class com.amap.location.** { *; }
 -dontwarn com.amap.api.**
 -dontwarn com.amap.api.map2d.**
 -dontwarn com.amap.api.mapcore.**
 -dontwarn com.amap.api.maps.**
+-dontwarn com.autonavi.**
+-dontwarn com.amap.location.**
+# 聚合包可选/平台相关类（R8 missing_rules）
+-dontwarn com.amap.ams.gnss.GnssSoftLocator
+-dontwarn net.jafama.FastMath
 
 # ---- Media3 / ExoPlayer ----
 -keep class androidx.media3.** { *; }
