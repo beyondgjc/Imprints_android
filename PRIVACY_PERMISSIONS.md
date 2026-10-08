@@ -89,12 +89,30 @@ Android 无法从 `shouldShowRequestPermissionRationale` 单独区分「首次�
 
 ## 三、第三方 SDK 采集情况
 
-| SDK | 版本 | 采集内容 | 触发时机 |
-|---|---|---|---|
-| 高德 `com.amap.api:search` | 9.7.1 | 当时的定位坐标、查询关键词 | 仅用户进入位置页并主动使用 |
-| 高德 `com.amap.api:3dmap` | 9.7.0 | 地图渲染 | 同上（仅位置详情页预览） |
+> 版本对应：**印迹 1.4**（`versionName=1.4` / `versionCode=5`）。  
+> 1.4 起不再分别依赖 `search` + `3dmap`，改为**一个聚合 Maven 坐标**。
+
+| Maven 坐标 | 版本 | 内含组件 | 本应用实际用途 | 何时触达网络 / 采集 |
+|---|---|---|---|---|
+| `com.amap.api:3dmap-location-search` | `11.3.100_loc11.3.000_sea9.8.1` | **地图 Map**、**搜索 Search**、**定位 Location** | ① 位置详情页 `MapView` 底图预览；② 位置页附近/关键字 **POI**；③ 高德定位服务 API **本应用未调用** | **仅用户进入位置相关功能并主动使用时** |
+
+**分量说明（申报时按此口径，避免写成「常驻定位 SDK」）**：
+
+| 组件 | 本应用是否调用 | 数据 |
+|---|---|---|
+| **地图 Map** | 是（位置详情） | 瓦片请求（展示底图）；叠加 marker 坐标 |
+| **搜索 Search** | 是（附近 / 关键字） | **当时坐标 + 查询关键词** 发往高德，返回地名/POI |
+| **定位 Location** | **否**（随聚合包打入，**无 `AMapLocation` 调用**） | 运行时坐标由 **系统 `LocationManager`** 取得（见第四章权限），不经高德定位 SDK 上报 |
+
+**合规门控**：
+
+- 首启隐私同意 **之前** 不初始化上述任何组件（`MainActivity` 同意门控）。
+- 用户首次使用 POI 前调用 `ServiceSettings.updatePrivacyShow` / `updatePrivacyAgree`（`AmapPoiService.ensurePrivacyAccepted`）。
+- 高德 Key 仅经 Manifest `meta-data` 注入，不写入代码仓库。
 
 **未集成**：统计 / 广告 / 推送 / 崩溃上报 / 用户行为分析 SDK。
+
+**维护**：升级 `gradle/libs.versions.toml` 中 `amapCombo` 后，必须同步改本表、`privacy_policy.txt` 第五章与 `user_agreement.txt` 中的 SDK 描述。
 
 ---
 
@@ -118,4 +136,4 @@ Android 无法从 `shouldShowRequestPermissionRationale` 单独区分「首次�
 
 ---
 
-*维护提示：新增/删除权限时，必须同步更新本文件与 `privacy_policy.txt` 第五章，并重跑 `grep uses-permission app/src/main/AndroidManifest.xml` 核对。*
+*维护提示：新增/删除权限或升级高德聚合包时，必须同步更新本文件、`app/src/main/assets/privacy_policy.txt`（第四、五章）与 `user_agreement.txt`，并重跑 `grep uses-permission app/src/main/AndroidManifest.xml` 与 `libs.versions.toml` 中 `amapCombo` 核对。*
