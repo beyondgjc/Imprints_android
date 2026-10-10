@@ -12,6 +12,8 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,6 +23,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
@@ -40,6 +44,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -76,7 +81,10 @@ import com.beyondguo.imprints.data.EntryEntity
 import com.beyondguo.imprints.data.EntryRules
 import com.beyondguo.imprints.data.FeelingEntity
 import com.beyondguo.imprints.data.ImprintRepository
+import com.beyondguo.imprints.data.PlaceEntity
+import com.beyondguo.imprints.data.TagCatalog
 import kotlinx.coroutines.launch
+
 import kotlinx.coroutines.delay
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -95,6 +103,9 @@ fun TimelinePage(
     onUnlock: () -> Unit, onBiometric: () -> Unit,
     scrollToId: String? = null, onScrollConsumed: () -> Unit = {},
     onOpenPlace: (com.beyondguo.imprints.data.PlaceEntity) -> Unit = {},
+    /** 已选中的标签 id；空集合 = 显示全部。状态由上层持有，便于导航往返后保留筛选。 */
+    selectedTagIds: Set<String> = emptySet(),
+    onToggleTag: (String) -> Unit = {},
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
@@ -109,39 +120,47 @@ fun TimelinePage(
     val listState = rememberLazyListState()
     var details by remember { mutableStateOf(emptyMap<String, EntryDetail>()) }
     var showTimeTravel by remember { mutableStateOf(false) }
+    // 标签筛选在内存里做：条目数有限，避免为每种筛选组合再写一套 DAO 查询
+    val tagsById = repository.tags.collectAsState(initial = emptyList()).value.associateBy { it.id }
+    val tagSelection = repository.entryTags.collectAsState(initial = emptyList()).value
+        .groupBy({ it.entryId }, { it.tagId })
+    val visibleEntries = remember(entries, tagSelection, selectedTagIds) {
+        if (selectedTagIds.isEmpty()) entries
+        else entries.filter { entry -> tagSelection[entry.id].orEmpty().any { it in selectedTagIds } }
+    }
     androidx.activity.compose.BackHandler(enabled = showTimeTravel) { showTimeTravel = false }
     LaunchedEffect(entries, epoch) {
         details = entries.mapNotNull { repository.detail(it.id)?.let { detail -> it.id to detail } }.toMap()
     }
-    val indexes = buildTimelineIndexes(entries.map { it.id to it.eventLocalMinute.take(7) })
-    val monthsWithEntries = entries.map { it.eventLocalMinute.take(7) }.toSet()
-    val daysWithEntries = entries.map { it.eventLocalMinute.take(10) }.toSet()
+    val indexes = buildTimelineIndexes(visibleEntries.map { it.id to it.eventLocalMinute.take(7) })
+    val monthsWithEntries = visibleEntries.map { it.eventLocalMinute.take(7) }.toSet()
+    val daysWithEntries = visibleEntries.map { it.eventLocalMinute.take(10) }.toSet()
 
     fun scrollToEntry(match: EntryEntity?) {
         if (match == null) return
         scope.launch { listState.scrollToItem(indexes[match.id] ?: 0) }
     }
 
-    LaunchedEffect(scrollToId, entries) {
+    LaunchedEffect(scrollToId, visibleEntries) {
         val id = scrollToId ?: return@LaunchedEffect
         val index = indexes[id]
         if (index != null) listState.scrollToItem(index)
         onScrollConsumed()
     }
 
-    if (showTimeTravel && entries.isNotEmpty()) {
+    if (showTimeTravel && visibleEntries.isNotEmpty()) {
         TimeTravelPage(
             monthsWithEntries = monthsWithEntries,
             daysWithEntries = daysWithEntries,
             onSelectMonth = { year, month ->
                 val target = "%04d-%02d".format(year, month)
-                val match = entries.firstOrNull { it.eventLocalMinute.take(7) <= target } ?: entries.last()
+                val match = visibleEntries.firstOrNull { it.eventLocalMinute.take(7) <= target } ?: visibleEntries.last()
                 showTimeTravel = false
                 scrollToEntry(match)
             },
             onSelectDay = { day ->
                 val target = day.toString()
-                val match = entries.firstOrNull { it.eventLocalMinute.take(10) <= target } ?: entries.last()
+                val match = visibleEntries.firstOrNull { it.eventLocalMinute.take(10) <= target } ?: visibleEntries.last()
                 showTimeTravel = false
                 scrollToEntry(match)
             },
@@ -167,17 +186,40 @@ fun TimelinePage(
                     Text(stringResource(R.string.timeline_title), Modifier.weight(1f), color = Ink, fontSize = 34.sp, fontWeight = FontWeight.Bold)
                     IconButton(onClick = onSettings) { Icon(Icons.Default.MoreVert, stringResource(R.string.a11y_settings), tint = Quiet) }
                 }
+                // 标签筛选：多选叠加（OR），全部未选 = 显示全部。横向滚动，标签变多也不换行挤压标题
+                LazyRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    item(key = "tag-label") {
+                        Text(stringResource(R.string.timeline_tag_filter), color = Quiet, fontSize = 13.sp)
+                    }
+                    items(TagCatalog.selectableIds, key = { it }) { id ->
+                        TagChip(
+                            text = tagsById[id]?.name ?: TagCatalog.nameOf(id) ?: id,
+                            selected = id in selectedTagIds,
+                            onClick = { onToggleTag(id) },
+                        )
+                    }
+                }
             }
         }
-        if (entries.isEmpty()) item {
+        if (entries.isEmpty() || visibleEntries.isEmpty()) item {
             Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 56.dp),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(stringResource(R.string.timeline_empty_title), color = Ink, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
-                Text(stringResource(R.string.timeline_empty_sub), color = Quiet, fontSize = 14.sp)
+                Text(
+                    if (entries.isEmpty()) stringResource(R.string.timeline_empty_title) else stringResource(R.string.timeline_filter_empty_title),
+                    color = Ink, fontSize = 21.sp, fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    if (entries.isEmpty()) stringResource(R.string.timeline_empty_sub) else stringResource(R.string.timeline_filter_empty_sub),
+                    color = Quiet, fontSize = 14.sp,
+                )
             }
         }
         var previousMonth = ""
-        entries.forEach { entry ->
+        visibleEntries.forEach { entry ->
             val month = entry.eventLocalMinute.take(7)
             if (month != previousMonth) {
                 // 对齐设计稿 20：吸顶栏 = 月份文字 + 右侧日历（时间穿梭），不再另起定位条
@@ -376,6 +418,7 @@ private fun displayMonth(value: String): String {
     return stringResource(R.string.timetravel_month_full, month.year, month.monthValue)
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DetailPage(
     repository: ImprintRepository, id: String, epoch: Int,
@@ -409,6 +452,17 @@ fun DetailPage(
             // 设计 49：先进入位置详情，再选择导航
             Text(stringResource(R.string.detail_place_meta, place.name), Modifier.clickable { onOpenPlace(place) }, color = Green, fontSize = 14.sp)
         } }
+        if (value.tagIds.isNotEmpty()) item {
+            FlowRow(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                value.tagIds.forEach { id ->
+                    TagChip(text = TagCatalog.nameOf(id) ?: id, selected = false, enabled = false, onClick = {})
+                }
+            }
+        }
         if (value.visuals.isNotEmpty()) item {
             // 约束媒体区高度，避免与下方音频/感受重叠
             MomentsMediaGrid(

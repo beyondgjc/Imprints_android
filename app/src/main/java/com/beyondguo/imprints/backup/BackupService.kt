@@ -8,9 +8,12 @@ import com.beyondguo.imprints.data.AudioEntity
 import com.beyondguo.imprints.data.EntryEntity
 import com.beyondguo.imprints.data.EntryFtsEntity
 import com.beyondguo.imprints.data.EntryRules
+import com.beyondguo.imprints.data.EntryTagEntity
 import com.beyondguo.imprints.data.ImprintDatabase
 import com.beyondguo.imprints.data.ImprintRepository
 import com.beyondguo.imprints.data.PlaceEntity
+import com.beyondguo.imprints.data.TagCatalog
+import com.beyondguo.imprints.data.TagEntity
 import com.beyondguo.imprints.data.VisualMediaEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -61,6 +64,9 @@ class BackupService(private val context: Context, private val database: ImprintD
             val visuals = dao.allVisuals().filter { it.entryId in ids }
             val audio = dao.allAudio().filter { it.entryId in ids }
             val places = dao.allPlaces().filter { place -> entries.any { it.placeId == place.id } }
+            // 标签：随备份整体搬运，导入端按 id 合并
+            val tags = dao.tagsOnce()
+            val entryTags = dao.allEntryTagsOnce().filter { it.entryId in ids }
             val feelings = entries.mapNotNull { entry ->
                 dao.feeling(entry.id)?.let { entry.id to (security.decodeFeeling(it) ?: "") }
             }.toMap()
@@ -80,6 +86,8 @@ class BackupService(private val context: Context, private val database: ImprintD
                 .put("visuals", JSONArray().apply { visuals.forEach { put(visualJson(it)) } })
                 .put("audio", JSONArray().apply { audio.forEach { put(audioJson(it)) } })
                 .put("places", JSONArray().apply { places.forEach { put(placeJson(it)) } })
+                .put("tags", JSONArray().apply { tags.forEach { put(tagJson(it)) } })
+                .put("entryTags", JSONArray().apply { entryTags.forEach { put(entryTagJson(it)) } })
                 .put("feelings", JSONObject().apply { feelings.forEach { (id, text) -> put(id, text) } })
             val bytes = metadata.toString().toByteArray(Charsets.UTF_8)
             context.contentResolver.openOutputStream(uri, "w")?.use { raw ->
@@ -163,6 +171,9 @@ class BackupService(private val context: Context, private val database: ImprintD
                 val visualsJson = parsed.metadata.getJSONArray("visuals")
                 val audioJson = parsed.metadata.getJSONArray("audio")
                 val placesJson = parsed.metadata.getJSONArray("places")
+                // 旧备份没有 tags / entryTags 两个数组，用 optJSONArray 兜底为“无标签”
+                val tagsJson = parsed.metadata.optJSONArray("tags")
+                val entryTagsJson = parsed.metadata.optJSONArray("entryTags")
                 val feelingsJson = parsed.metadata.getJSONObject("feelings")
                 val cutoff = EntryRules.recycleCutoff(System.currentTimeMillis())
                 val entries = (0 until entriesJson.length()).map { entriesJson.getJSONObject(it) }
@@ -182,6 +193,25 @@ class BackupService(private val context: Context, private val database: ImprintD
                         placeMap[originalId] = placeFromJson(raw).copy(id = UUID.randomUUID().toString())
                     }
                 }
+                // 标签按 id 合并（id 即语义，跨设备一致）；未知 id 丢弃，预置标签保留本机既有行
+                val tags = buildList {
+                    if (tagsJson != null) {
+                        for (i in 0 until tagsJson.length()) {
+                            val tag = tagFromJson(tagsJson.getJSONObject(i))
+                            if (TagCatalog.isKnown(tag.id)) add(tag)
+                        }
+                    }
+                }.distinctBy { it.id }
+                val entryTags = buildList {
+                    if (entryTagsJson != null) {
+                        for (i in 0 until entryTagsJson.length()) {
+                            val raw = entryTagsJson.getJSONObject(i)
+                            val entryId = raw.getString("entryId")
+                            val tagId = raw.getString("tagId")
+                            if (entryId in included && TagCatalog.isKnown(tagId)) add(EntryTagEntity(entryId, tagId))
+                        }
+                    }
+                }.distinctBy { it.entryId to it.tagId }
                 val fileMap = mutableMapOf<String, String>()
                 fun install(oldId: String): String {
                     fileMap[oldId]?.let { return it }
@@ -228,6 +258,9 @@ class BackupService(private val context: Context, private val database: ImprintD
                     if (visuals.isNotEmpty()) dao.insertVisuals(visuals)
                     audio.forEach { dao.upsertAudio(it) }
                     feelings.forEach { dao.upsertFeeling(it) }
+                    // IGNORE：导出的标签行不得覆盖本机既有预置标签
+                    if (tags.isNotEmpty()) dao.insertTags(tags)
+                    if (entryTags.isNotEmpty()) dao.insertEntryTags(entryTags)
                 }
                 entries.size
             } catch (error: Exception) {
@@ -379,6 +412,11 @@ class BackupService(private val context: Context, private val database: ImprintD
         if (j.isNull("latitude")) null else j.getDouble("latitude"), if (j.isNull("longitude")) null else j.getDouble("longitude"),
         j.getString("coordinateSystem").takeIf { it.isNotEmpty() }, j.getString("provider").takeIf { it.isNotEmpty() },
         j.getString("providerPoiId").takeIf { it.isNotEmpty() })
+    private fun tagJson(t: TagEntity) = JSONObject().put("id", t.id).put("name", t.name)
+        .put("ordinal", t.ordinal).put("archived", t.archived)
+    private fun tagFromJson(j: JSONObject) = TagEntity(j.getString("id"), j.getString("name"),
+        j.optInt("ordinal", TagCatalog.PRESETS.size), j.optBoolean("archived", false))
+    private fun entryTagJson(e: EntryTagEntity) = JSONObject().put("entryId", e.entryId).put("tagId", e.tagId)
 
     companion object {
         private val DISCARD = object : OutputStream() { override fun write(b: Int) = Unit }

@@ -105,6 +105,8 @@ fun ImprintsApp(
     var confirmDelete by remember { mutableStateOf<String?>(null) }
     var confirmDisableFeeling by remember { mutableStateOf(false) }
     var securityEpoch by remember { mutableStateOf(0) }
+    // 时间线标签筛选：状态放在导航层，进出详情/编辑后仍保留筛选
+    var selectedTagIds by remember { mutableStateOf(emptySet<String>()) }
     val security = repository.security
     val context = LocalContext.current
     val backup = remember(repository) { BackupService(context, ImprintDatabase.get(context), repository) }
@@ -296,7 +298,11 @@ fun ImprintsApp(
                     },
                     scrollToId = pendingScrollToId,
                     onScrollConsumed = { pendingScrollToId = null },
-                    onOpenPlace = { place -> page = Page.LocationDetail(place) })
+                    onOpenPlace = { place -> page = Page.LocationDetail(place) },
+                    selectedTagIds = selectedTagIds,
+                    onToggleTag = { id ->
+                        selectedTagIds = if (id in selectedTagIds) selectedTagIds - id else selectedTagIds + id
+                    })
                 Page.Settings -> SettingsPage(feelingMode, feelingBioEnabled, appLockEnabled, appBioEnabled,
                     onRecycle = { page = Page.Recycle },
                     onFeeling = {

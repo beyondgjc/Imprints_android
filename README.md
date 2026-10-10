@@ -40,9 +40,24 @@ app/src/main/java/com/beyondguo/imprints/
 - Gradle 标准构建 `.\gradlew.bat :app:assembleDebug :app:testDebugUnitTest` **BUILD SUCCESSFUL**（Android Studio JBR 21）。
 - JVM 单元测试 **29** 项通过（备份帧/头、EntryRules、MediaKindDetector、PinPolicy、TimelineLocator、Wgs84GCJ02 等）。
 - 当前版本 **1.4（versionCode 5）**；见下方 Release 1.4。
+- **标签分类进行中**（2026-10-10，未打 release）：数据库 **version 3**，JVM 单测 **42** 项、设备测试 **27** 项（模拟器 + MI 8 各一遍）全部通过。详见下方「标签分类」。
 - Git：独立仓；远端 **GitHub 私有** `beyondgjc/Imprints_android`。勿提交 `local.properties` / keystore / 口令。
 - 高德 Key 在本机 `local.properties`（勿提交）。地图/POI 使用 `3dmap-location-search`（MAP so **16KB 对齐**）。
 - 真机：MI 8 实测选图回锁、系统录音机、生物识别弹窗、位置详情地图；加密/备份等以设备冒烟为准。
+
+## 标签分类（2026-10-10：已编码 + 编译 + 单测 + 设备测试，未打 release）
+
+印迹变多后时间线全量平铺会乱，本次加入**预置标签 + 时间线按标签筛选**。
+
+- **预置标签**（`data/TagCatalog.kt`）：个人经历 / 国家大事 / 互联网热点 / 工作 / 旅行。当前不支持用户自建；标签 **id 一经发布不可改动**，停用只置 `archived`。
+- **一条印迹挂 0~N 个标签**：新增 `tags` + `entry_tags` 表；`EntryDraft.tagIds` / `EntryDetail.tagIds` 承载；保存时按目录顺序归一化（丢弃未知 id、去重）。外键 CASCADE，删印迹/删标签自动清关联，不留孤儿行。
+- **时间线筛选**：标题下方一行标签 chip，可多选叠加（**OR 语义**），再点取消；全部未选 = 显示全部。筛选在内存里做（条目数有限），没有新增 DAO 查询。
+- **筛选联动**：月份吸顶、时间穿梭（月份/日期绿点）、搜索回跳定位都以**筛选结果**为准；筛选无结果时用独立空态文案，不误报「还没有印迹」。
+- **编辑页**：正文下方标签区 chip 多选（计入「未保存修改」脏检查）；**详情页**只读展示已挂标签。
+- **备份**：metadata 增加 `tags` / `entryTags`；导入端 `optJSONArray` 兜底，**旧备份（无这两个数组）仍可导入**，导入后不挂标签；标签按 id 合并，`INSERT OR IGNORE` 不覆盖本机既有预置行。
+- **数据库迁移**：`version = 3` + `MIGRATION_2_3`（建两张表 + 种预置标签），schema 导出到 `app/schemas/…/3.json`。
+- **测试**：`TagCatalogTest`（JVM 10 项，目录/归一化/筛选语义）、`TagRepositoryTest`（设备 8 项，Room 映射、归一化落库、外键级联、筛选）、`ImprintMigration2To3Test`（设备，用 `2.json` 的原始 DDL 建 v2 库后让 Room 真实升级，校验结构、预置标签、旧数据留存）。
+- **本轮未验证**：升级到真机旧库后的**肉眼回归**（自动化迁移测试已覆盖 Room 结构校验与旧数据留存）；标签筛选与标签选择区的**视觉验收截图**。
 
 ## Release 历史
 

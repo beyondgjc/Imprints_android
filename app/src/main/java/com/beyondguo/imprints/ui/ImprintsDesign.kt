@@ -5,6 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -17,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -41,6 +44,44 @@ internal fun SectionTitle(title: String, modifier: Modifier = Modifier) {
 internal fun OutlinePanel(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Surface(modifier, shape = RoundedCornerShape(18.dp), color = Color.White,
         border = BorderStroke(1.dp, Line), content = content)
+}
+
+/**
+ * 标签胶囊。时间线筛选栏与编辑页选择区共用同一套视觉：
+ * 选中 = 浅绿底 + 绿字 + 绿描边；未选中 = 白底 + 灰字 + 细描边。
+ */
+@Composable
+internal fun TagChip(text: String, selected: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = when {
+            !enabled -> SoftCard
+            selected -> PaleGreen
+            else -> Color.White
+        },
+        border = BorderStroke(1.dp, if (selected && enabled) Green else Line),
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .clickable(enabled = enabled, onClick = onClick),
+    ) {
+        Text(
+            text,
+            Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+            color = if (selected && enabled) Green else Quiet,
+            fontSize = 14.sp,
+            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+            maxLines = 1,
+        )
+    }
+}
+
+/** 编辑页标签小节：标题 + 右侧灰色说明。 */
+@Composable
+internal fun TagSectionLabel(title: String, hint: String, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, Modifier.weight(1f), color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Text(hint, color = Quiet, fontSize = 12.sp)
+    }
 }
 
 /** 小节标签：12sp 灰字，对齐 Penly SectionTitle */

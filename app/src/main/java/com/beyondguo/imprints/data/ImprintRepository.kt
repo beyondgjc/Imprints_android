@@ -29,6 +29,8 @@ data class EntryDraft(
     val audio: AudioChoice? = null,
     val feeling: String = "",
     val place: PlaceEntity? = null,
+    /** 预置标签 id 集合；保存时按 TagCatalog 归一化（丢弃未知 id、去重、按目录排序）。 */
+    val tagIds: List<String> = emptyList(),
 )
 
 data class EntryDetail(
@@ -37,6 +39,7 @@ data class EntryDetail(
     val audio: AudioEntity?,
     val feeling: FeelingEntity?,
     val place: PlaceEntity?,
+    val tagIds: List<String> = emptyList(),
 )
 
 class ImprintRepository(
@@ -47,12 +50,19 @@ class ImprintRepository(
     private val dao = database.dao()
     val active: Flow<List<EntryEntity>> = dao.activeEntries()
     val recycled: Flow<List<EntryEntity>> = dao.recycledEntries()
+    /** 预置标签表；时间线筛选栏与编辑页选项都来自这里。 */
+    val tags: Flow<List<TagEntity>> = dao.allTags()
+    /** 印迹 ↔ 标签关联，供时间线在内存里筛选。 */
+    val entryTags: Flow<List<EntryTagEntity>> = dao.allEntryTags()
 
     suspend fun <T> exclusive(block: suspend () -> T): T = mutation.withLock { block() }
 
     suspend fun detail(id: String): EntryDetail? {
         val entry = dao.entry(id) ?: return null
-        return EntryDetail(entry, dao.visuals(id), dao.audio(id), dao.feeling(id), entry.placeId?.let { dao.place(it) })
+        return EntryDetail(
+            entry, dao.visuals(id), dao.audio(id), dao.feeling(id), entry.placeId?.let { dao.place(it) },
+            TagCatalog.normalizeSelection(dao.tagsOf(id)),
+        )
     }
 
     suspend fun save(draft: EntryDraft): String = mutation.withLock {
@@ -66,6 +76,7 @@ class ImprintRepository(
         val oldAudio = dao.audio(id)
         val now = System.currentTimeMillis()
         val feeling = security.encodeFeeling(id, draft.feeling)
+        val tagIds = TagCatalog.normalizeSelection(draft.tagIds)
         val committedNew = mutableListOf<String>()
         try {
             val visuals = draft.visuals.mapIndexed { ordinal, choice ->
@@ -115,6 +126,9 @@ class ImprintRepository(
                 if (feeling != null) dao.upsertFeeling(feeling)
                 dao.deleteFts(id)
                 if (body.isNotBlank()) dao.insertFts(EntryFtsEntity(entryId = id, body = body))
+                // 标签整体替换：多挂/少挂都在这里一次性对齐
+                dao.deleteEntryTags(id)
+                if (tagIds.isNotEmpty()) dao.insertEntryTags(tagIds.map { EntryTagEntity(id, it) })
             }
             val retained = visuals.flatMap { listOf(it.relativePath) + listOfNotNull(it.motionVideoPath) }.toSet() +
                 listOfNotNull(audio?.relativePath)

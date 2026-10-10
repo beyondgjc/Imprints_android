@@ -43,6 +43,11 @@
     <string name="editor_place_label">所在位置</string>
     <string name="editor_event_time_label">事件时间</string>
     <string name="timeline_title">我的印迹</string>
+    <string name="timeline_tag_filter">标签</string>
+    <string name="timeline_filter_empty_title">这个标签下还没有印迹</string>
+    <string name="timeline_filter_empty_sub">取消筛选，或给印迹挂上这个标签。</string>
+    <string name="editor_tag_label">标签</string>
+    <string name="editor_tag_hint">可多选，方便日后按类别回顾</string>
     <string name="timeline_empty_title">留下你的第一条印迹</string>
     <string name="timeline_empty_sub">经历、见闻，或某一刻的感受。</string>
     <string name="action_collapse">收起</string>

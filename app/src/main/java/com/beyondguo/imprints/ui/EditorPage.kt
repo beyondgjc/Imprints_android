@@ -15,6 +15,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -71,6 +73,9 @@ import com.beyondguo.imprints.data.EntryRules
 import com.beyondguo.imprints.data.ImprintRepository
 import com.beyondguo.imprints.data.MediaChoice
 import com.beyondguo.imprints.data.PlaceEntity
+import com.beyondguo.imprints.data.TagCatalog
+import com.beyondguo.imprints.data.TagEntity
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -81,8 +86,10 @@ import androidx.compose.ui.res.stringResource
 private data class EditorSnapshot(
     val body: String, val feeling: String, val eventTime: String, val placeName: String,
     val place: PlaceEntity?, val visuals: List<String>, val audio: String?,
+    val tagIds: Set<String> = emptySet(),
 )
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EditorPage(
     repository: ImprintRepository, id: String?, epoch: Int,
@@ -119,6 +126,12 @@ fun EditorPage(
     var initial by remember(id) { mutableStateOf<EditorSnapshot?>(null) }
     var exitRequested by remember(id) { mutableStateOf(false) }
     var showEventTimePicker by remember(id) { mutableStateOf(false) }
+    // 标签：availableTags 来自预置标签表，selectedTagIds 是本条的挂载集合（0~N）
+    var selectedTagIds by remember(id) { mutableStateOf(emptySet<String>()) }
+    var availableTags by remember { mutableStateOf(emptyList<TagEntity>()) }
+    LaunchedEffect(id) {
+        availableTags = repository.tags.first()
+    }
 
     // 这些文案在 LaunchedEffect / Toast 等非 Composable 回调里被引用，
     // 那里不能调 stringResource，所以在入口先取成局部 val 闭包捕获。
@@ -130,7 +143,8 @@ fun EditorPage(
 
     fun snapshot() = EditorSnapshot(body, feeling, eventTime, placeName, selectedPlace,
         visuals.map { when (it) { is MediaChoice.Existing -> it.value.id; is MediaChoice.New -> it.value.id } },
-        when (val selected = audio) { is AudioChoice.Existing -> selected.value.id; is AudioChoice.New -> selected.value.id; null -> null })
+        when (val selected = audio) { is AudioChoice.Existing -> selected.value.id; is AudioChoice.New -> selected.value.id; null -> null },
+        selectedTagIds)
     fun discardPending() {
         visuals.forEach { if (it is MediaChoice.New) repository.files.discard(it.value) }
         (audio as? AudioChoice.New)?.let { repository.files.discard(it.value) }
@@ -158,6 +172,8 @@ fun EditorPage(
                 visuals.clear()
                 visuals.addAll(detail.visuals.map(MediaChoice::Existing))
                 audio = detail.audio?.let(AudioChoice::Existing)
+                // 标签不参与“感受解锁”分支，用 loaded 单独把住，避免锁屏返回后丢选择
+                if (!loaded) selectedTagIds = detail.tagIds.toSet()
             }
             val decoded = runCatching { repository.security.decodeFeeling(detail.feeling) }
             val wasBlocked = blocked
@@ -254,6 +270,7 @@ fun EditorPage(
         scope.launch {
             val draft = EntryDraft(id = id, body = body, eventLocalMinute = eventTime,
                 visuals = visuals.toList(), audio = audio, feeling = feeling,
+                tagIds = TagCatalog.normalizeSelection(selectedTagIds),
                 place = selectedPlace ?: placeName.trim().takeIf(String::isNotEmpty)?.let {
                     PlaceEntity(UUID.randomUUID().toString(), it, "", null, null, null, "MANUAL", null)
                 })
@@ -309,6 +326,28 @@ fun EditorPage(
             colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent,
                 unfocusedContainerColor = Color.Transparent, focusedIndicatorColor = Color.Transparent,
                 unfocusedIndicatorColor = Color.Transparent)) }
+        // 标签：预置标签多选（0~N），用于时间线按类别筛选
+        if (availableTags.isNotEmpty()) item {
+            Column(Modifier.fillMaxWidth().padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                TagSectionLabel(stringResource(R.string.editor_tag_label), stringResource(R.string.editor_tag_hint))
+                FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    availableTags.forEach { tag ->
+                        TagChip(
+                            text = tag.name,
+                            selected = tag.id in selectedTagIds,
+                            enabled = !tag.archived,
+                            onClick = {
+                                selectedTagIds = if (tag.id in selectedTagIds) selectedTagIds - tag.id else selectedTagIds + tag.id
+                            },
+                        )
+                    }
+                }
+            }
+        }
         // 媒体：无分区标题、无中间分隔线，直接网格 +「图片/视频」入口
         item {
             EditorMediaGrid(
