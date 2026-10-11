@@ -953,6 +953,10 @@ private fun SearchPage(repository: ImprintRepository, onOpen: (String) -> Unit,
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf(emptyList<EntryEntity>()) }
     val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
+    // 仅 debug：支持用 adb 广播预填搜索词（中文无法通过 input text 注入），供截图与手工验收
+    LaunchedEffect(Unit) {
+        DebugSeedBridge.prefillSearch()?.let { query = it }
+    }
     LaunchedEffect(query) {
         if (query.isBlank()) results = emptyList()
         else runCatching { repository.searchBody(query) }.onSuccess { results = it }.onFailure(report)

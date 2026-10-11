@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  仅 debug 构建合并：注册一个空实现的 ContentProvider，只为在进程启动时
+  自注册 adb 调试钩子（见 DebugSeed / DebugSeedProvider）。
+  正式构建不包含此文件，因此没有任何可被外部触发的调试入口。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application>
+        <provider
+            android:name="com.beyondguo.imprints.ui.DebugSeedProvider"
+            android:authorities="${applicationId}.debugseed"
+            android:exported="false"
+            android:enabled="true"
+            tools:ignore="MissingClass" />
+    </application>
+</manifest>
