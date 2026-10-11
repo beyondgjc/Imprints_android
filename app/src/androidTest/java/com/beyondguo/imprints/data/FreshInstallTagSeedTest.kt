@@ -9,8 +9,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Before
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -35,7 +36,7 @@ class FreshInstallTagSeedTest {
     }
 
     private fun openDatabase() = Room.databaseBuilder(context, ImprintDatabase::class.java, dbName)
-        .addMigrations(ImprintDatabase.MIGRATION_1_2, ImprintDatabase.MIGRATION_2_3)
+        .addMigrations(ImprintDatabase.MIGRATION_1_2, ImprintDatabase.MIGRATION_2_3, ImprintDatabase.MIGRATION_3_4)
         .addCallback(ImprintDatabase.SEED_TAGS_ON_CREATE)
         .build()
 
@@ -46,22 +47,25 @@ class FreshInstallTagSeedTest {
             runBlocking {
                 val tags = db.dao().tagsOnce()
                 assertEquals(TagCatalog.PRESETS.size, tags.size)
-                assertEquals(TagCatalog.selectableIds, tags.map { it.id })
+                assertEquals(TagCatalog.PRESETS.map { it.id }, tags.map { it.id })
                 assertEquals(TagCatalog.PRESETS.map { it.name }, tags.map { it.name })
-                // 预置标签一开箱即可挂载：新库直接建印迹并带上标签
+                assertTrue(tags.all { it.preset })
+                assertTrue(tags.all { it.createdAtMs == 0L })
+                assertEquals(TagCatalog.PRESETS.size, db.dao().activeTagCount())
+
+                // 开箱即可挂载预置标签，也可以直接新建自定义标签
                 val repository = ImprintRepository(db, MediaFiles(context), ImprintSecurity(db))
-                assertEquals(
-                    TagCatalog.PRESETS.size,
-                    repository.tags.first().size,
-                )
+                val custom = repository.createTag("读书")
                 val id = repository.save(
                     EntryDraft(
                         body = "新装第一条",
                         eventLocalMinute = "2026-10-11T10:00",
-                        tagIds = listOf(TagCatalog.selectableIds[0], "未知标签"),
+                        tagIds = listOf(custom, "未知标签"),
                     ),
                 )
-                assertEquals(listOf(TagCatalog.selectableIds[0]), repository.detail(id)!!.tagIds)
+                // 预置在前、自定义在后；未知 id 被丢弃
+                assertEquals(listOf(custom), repository.detail(id)!!.tagIds)
+                assertEquals(TagCatalog.PRESETS.size + 1, repository.selectableTags.first().size)
             }
         } finally {
             db.close()
@@ -76,7 +80,7 @@ class FreshInstallTagSeedTest {
         try {
             runBlocking {
                 assertEquals(TagCatalog.PRESETS.size, db.dao().tagsOnce().size)
-                assertNotNull(db.dao().tagsOnce().firstOrNull { it.id == TagCatalog.selectableIds.first() })
+                assertNotNull(db.dao().tagsOnce().firstOrNull { it.preset })
             }
         } finally {
             db.close()

@@ -1,12 +1,11 @@
 package com.beyondguo.imprints.data
 
 /**
- * 预置标签目录（当前版本不支持用户自建标签）。
+ * 预置标签目录。用户可以在这些标签之外自由新建标签（见 [TagRules]），
+ * 预置标签本身**不可删除**（因为无法在库层面保护它们，只能靠这个 id 列表识别）。
  *
- * 每个预置标签的 [TagPreset.id] 一经发布就不能改动：
- * - Room 迁移按这些 id 写入初值；
- * - 备份导出/导入用它做白名单校验；
- * - 未来若要「停用」某个标签，只把 [TagPreset.archived] 置 true，绝不复用或删除 id。
+ * [TagPreset.id] 一经发布就不能改动：Room 迁移按这些 id 种初值，备份导入用它判断预置身份。
+ * 未来若要「停用」某个预置标签，只把 [TagPreset.archived] 置 true，绝不复用或删除 id。
  */
 object TagCatalog {
     data class TagPreset(val id: String, val name: String, val ordinal: Int, val archived: Boolean = false)
@@ -19,28 +18,21 @@ object TagCatalog {
         TagPreset("travel", "旅行", 4),
     )
 
-    /** 时间线筛选栏与编辑页可选的标签，按 [TagPreset.ordinal] 排序；不含已停用标签。 */
-    val selectableIds: List<String> = PRESETS.filterNot { it.archived }.sortedBy { it.ordinal }.map { it.id }
+    /** 建库/迁移时写入的预置标签行。createdAtMs 用 0，靠 ordinal 排序。 */
+    val seed: List<TagEntity> = PRESETS.map {
+        TagEntity(it.id, it.name, it.ordinal, it.archived, preset = true, createdAtMs = 0)
+    }
 
-    private val byId: Map<String, TagPreset> = PRESETS.associateBy { it.id }
+    /** 预置标签的 id 集合：用于禁止删除预置标签。 */
+    val presetIds: Set<String> = PRESETS.map { it.id }.toSet()
 
-    val seed: List<TagEntity> = PRESETS.map { TagEntity(it.id, it.name, it.ordinal, it.archived) }
+    fun isPreset(id: String): Boolean = id in presetIds
 
-    fun nameOf(id: String): String? = byId[id]?.name
-
-    /** 是否是可挂到印迹上的预置标签（未知 id 一律视为脏数据丢弃）。 */
-    fun isKnown(id: String): Boolean = byId[id]?.archived == false
-
-    /**
-     * 归一化一条印迹的标签集合：丢弃未知/已停用标签、去重，并按目录顺序排序。
-     * 时间线分组与编辑页回填都依赖这里的稳定顺序。
-     */
-    fun normalizeSelection(ids: Collection<String>): List<String> =
-        ids.filter { isKnown(it) }.distinct().sortedBy { byId.getValue(it).ordinal }
+    fun nameOf(id: String): String? = PRESETS.firstOrNull { it.id == id }?.name
 
     /**
-     * 时间线筛选：选中集合为空表示「全部」。[selected] 与 [entryTagIds] 都用 id 比较。
-     * 采用 OR 语义：只要命中任一选中标签就显示。
+     * 时间线筛选：选中集合为空表示「全部」。
+     * 自定义标签只存在于数据库里，所以这里只比较 id，不校验存在性（调用方传库内有效 id）。
      */
     fun matchesFilter(selected: Set<String>, entryTagIds: Collection<String>): Boolean =
         selected.isEmpty() || entryTagIds.any { it in selected }

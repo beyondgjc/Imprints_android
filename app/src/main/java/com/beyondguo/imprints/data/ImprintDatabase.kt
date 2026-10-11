@@ -81,6 +81,10 @@ data class TagEntity(
     val name: String,
     val ordinal: Int,
     val archived: Boolean = false,
+    /** true = 内置预置标签（不可删除）；false = 用户自定义标签。 */
+    val preset: Boolean = false,
+    /** 自定义标签的创建时间，用于展示排序；预置标签为 0，靠 [ordinal] 排序。 */
+    val createdAtMs: Long = 0,
 )
 
 /**
@@ -112,6 +116,9 @@ data class PlaceEntity(
     val provider: String?,
     val providerPoiId: String?,
 )
+
+/** 「常用标签」的查询投影：标签 id 与它被多少条印迹使用。 */
+data class TagUsageCount(val tagId: String, val count: Int)
 
 @Entity(tableName = "security_state")
 data class SecurityStateEntity(
@@ -186,11 +193,26 @@ interface ImprintDao {
     @Query("SELECT * FROM places")
     suspend fun allPlaces(): List<PlaceEntity>
 
-    @Query("SELECT * FROM tags ORDER BY ordinal, id")
+    @Query("SELECT * FROM tags ORDER BY preset DESC, ordinal, createdAtMs, id")
     fun allTags(): Flow<List<TagEntity>>
 
-    @Query("SELECT * FROM tags ORDER BY ordinal, id")
+    @Query("SELECT * FROM tags ORDER BY preset DESC, ordinal, createdAtMs, id")
     suspend fun tagsOnce(): List<TagEntity>
+
+    /** 时间线筛选栏与编辑页展示的标签：不含已停用。 */
+    @Query("SELECT * FROM tags WHERE archived = 0 ORDER BY preset DESC, ordinal, createdAtMs, id")
+    fun activeTags(): Flow<List<TagEntity>>
+
+    @Query("SELECT COUNT(*) FROM tags WHERE archived = 0")
+    suspend fun activeTagCount(): Int
+
+    /** 删除确认用：这个标签挂了多少条印迹。 */
+    @Query("SELECT COUNT(*) FROM entry_tags WHERE tagId = :id")
+    suspend fun entryCountForTag(id: String): Int
+
+    /** 「常用标签」用：一次取回所有标签的使用次数（不 N+1 查询）。 */
+    @Query("SELECT tagId, COUNT(*) AS count FROM entry_tags GROUP BY tagId")
+    suspend fun tagUsageCounts(): List<TagUsageCount>
 
     /** 时间线用：一次取回全部关联，交给内存按选中标签筛选。 */
     @Query("SELECT * FROM entry_tags")
@@ -211,12 +233,16 @@ interface ImprintDao {
     @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertFts(value: EntryFtsEntity)
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun insertEntryTags(values: List<EntryTagEntity>)
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun insertTags(values: List<TagEntity>)
+    @Insert(onConflict = OnConflictStrategy.ABORT) suspend fun insertTag(value: TagEntity)
 
     @Query("DELETE FROM visual_media WHERE entryId = :id") suspend fun deleteVisuals(id: String)
     @Query("DELETE FROM audio WHERE entryId = :id") suspend fun deleteAudio(id: String)
     @Query("DELETE FROM feelings WHERE entryId = :id") suspend fun deleteFeeling(id: String)
     @Query("DELETE FROM entry_fts WHERE entryId = :id") suspend fun deleteFts(id: String)
     @Query("DELETE FROM entry_tags WHERE entryId = :id") suspend fun deleteEntryTags(id: String)
+    @Query("DELETE FROM entry_tags WHERE tagId = :tagId") suspend fun deleteEntryTagsForTag(tagId: String)
+    @Query("UPDATE tags SET name = :name WHERE id = :id") suspend fun renameTag(id: String, name: String)
+    @Query("DELETE FROM tags WHERE id = :id") suspend fun deleteTag(id: String)
     @Query("DELETE FROM entries WHERE id = :id") suspend fun deleteEntry(id: String)
     @Query("DELETE FROM places WHERE id = :id AND id NOT IN (SELECT placeId FROM entries WHERE placeId IS NOT NULL)") suspend fun deleteUnusedPlace(id: String)
     @Query("SELECT relativePath FROM visual_media UNION SELECT relativePath FROM audio")
@@ -228,7 +254,7 @@ interface ImprintDao {
 
 @Database(
     entities = [EntryEntity::class, VisualMediaEntity::class, AudioEntity::class, FeelingEntity::class, PlaceEntity::class, SecurityStateEntity::class, EntryFtsEntity::class, TagEntity::class, EntryTagEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class ImprintDatabase : RoomDatabase() {
@@ -260,8 +286,30 @@ abstract class ImprintDatabase : RoomDatabase() {
                         "FOREIGN KEY(`tagId`) REFERENCES `tags`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)",
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_entry_tags_tagId` ON `entry_tags` (`tagId`)")
-                // 预置标签在迁移里落库；已存在的 id 保留，避免覆盖用户机器上的旧值
-                insertPresetTags(db)
+                // 此处只建 v3 的 4 列结构，preset/createdAtMs 由 MIGRATION_3_4 追加
+                TagCatalog.PRESETS.forEach { preset ->
+                    db.execSQL(
+                        "INSERT OR IGNORE INTO `tags` (`id`, `name`, `ordinal`, `archived`) VALUES (?, ?, ?, ?)",
+                        arrayOf<Any>(preset.id, preset.name, preset.ordinal, if (preset.archived) 1 else 0),
+                    )
+                }
+            }
+        }
+
+        /**
+         * v3→v4：标签支持用户自定义。新增 `preset`（预置/自定义）与 `createdAtMs`（自定义标签排序）。
+         * 已有的 5 个预置标签按 id 回填为 preset = 1、createdAtMs = 0，展示顺序不变。
+         */
+        internal val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `tags` ADD COLUMN `preset` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `tags` ADD COLUMN `createdAtMs` INTEGER NOT NULL DEFAULT 0")
+                TagCatalog.PRESETS.forEach { preset ->
+                    db.execSQL(
+                        "UPDATE `tags` SET `preset` = 1, `createdAtMs` = 0, `ordinal` = ? WHERE `id` = ?",
+                        arrayOf<Any>(preset.ordinal, preset.id),
+                    )
+                }
             }
         }
 
@@ -269,8 +317,8 @@ abstract class ImprintDatabase : RoomDatabase() {
         private fun insertPresetTags(db: SupportSQLiteDatabase) {
             TagCatalog.seed.forEach { tag ->
                 db.execSQL(
-                    "INSERT OR IGNORE INTO `tags` (`id`, `name`, `ordinal`, `archived`) VALUES (?, ?, ?, ?)",
-                    arrayOf<Any>(tag.id, tag.name, tag.ordinal, if (tag.archived) 1 else 0),
+                    "INSERT OR IGNORE INTO `tags` (`id`, `name`, `ordinal`, `archived`, `preset`, `createdAtMs`) VALUES (?, ?, ?, ?, ?, ?)",
+                    arrayOf<Any>(tag.id, tag.name, tag.ordinal, if (tag.archived) 1 else 0, if (tag.preset) 1 else 0, tag.createdAtMs),
                 )
             }
         }
@@ -285,7 +333,7 @@ abstract class ImprintDatabase : RoomDatabase() {
 
         fun get(context: Context): ImprintDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, ImprintDatabase::class.java, "imprints.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .addCallback(SEED_TAGS_ON_CREATE)
                 .build().also { instance = it }
         }

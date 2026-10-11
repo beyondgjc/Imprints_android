@@ -23,8 +23,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
@@ -106,6 +104,8 @@ fun TimelinePage(
     /** 已选中的标签 id；空集合 = 显示全部。状态由上层持有，便于导航往返后保留筛选。 */
     selectedTagIds: Set<String> = emptySet(),
     onToggleTag: (String) -> Unit = {},
+    onCreateTag: (String) -> Unit = {},
+    onError: (Throwable) -> Unit = {},
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
@@ -120,8 +120,9 @@ fun TimelinePage(
     val listState = rememberLazyListState()
     var details by remember { mutableStateOf(emptyMap<String, EntryDetail>()) }
     var showTimeTravel by remember { mutableStateOf(false) }
+    var onFilterCreateTag by remember { mutableStateOf(false) }
     // 标签筛选在内存里做：条目数有限，避免为每种筛选组合再写一套 DAO 查询
-    val tagsById = repository.tags.collectAsState(initial = emptyList()).value.associateBy { it.id }
+    val selectableTags = repository.selectableTags.collectAsState(initial = emptyList()).value
     val tagSelection = repository.entryTags.collectAsState(initial = emptyList()).value
         .groupBy({ it.entryId }, { it.tagId })
     val visibleEntries = remember(entries, tagSelection, selectedTagIds) {
@@ -186,23 +187,14 @@ fun TimelinePage(
                     Text(stringResource(R.string.timeline_title), Modifier.weight(1f), color = Ink, fontSize = 34.sp, fontWeight = FontWeight.Bold)
                     IconButton(onClick = onSettings) { Icon(Icons.Default.MoreVert, stringResource(R.string.a11y_settings), tint = Quiet) }
                 }
-                // 标签筛选：多选叠加（OR），全部未选 = 显示全部。横向滚动，标签变多也不换行挤压标题
-                LazyRow(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    item(key = "tag-label") {
-                        Text(stringResource(R.string.timeline_tag_filter), color = Quiet, fontSize = 13.sp)
-                    }
-                    items(TagCatalog.selectableIds, key = { it }) { id ->
-                        TagChip(
-                            text = tagsById[id]?.name ?: TagCatalog.nameOf(id) ?: id,
-                            selected = id in selectedTagIds,
-                            onClick = { onToggleTag(id) },
-                        )
-                    }
-                }
+                // 标签筛选：多选叠加（OR），全部未选 = 显示全部
+                TagFilterRow(
+                    tags = selectableTags,
+                    selectedIds = selectedTagIds,
+                    onToggle = onToggleTag,
+                    onCreate = { onFilterCreateTag = true },
+                    createDisabled = com.beyondguo.imprints.data.TagRules.hasReachedLimit(selectableTags.size),
+                )
             }
         }
         if (entries.isEmpty() || visibleEntries.isEmpty()) item {
@@ -407,6 +399,20 @@ fun TimelinePage(
             }
         }
     }
+
+    // 筛选栏的新建入口：这里只负责把标签建出来并让上层选中它
+    if (onFilterCreateTag) {
+        TagNameDialog(
+            title = stringResource(R.string.tag_create_title),
+            initial = "",
+            confirmLabel = stringResource(R.string.action_confirm),
+            onDismiss = { onFilterCreateTag = false },
+            onConfirm = { name ->
+                runCatching { onCreateTag(name) }.onFailure(onError)
+                onFilterCreateTag = false
+            },
+        )
+    }
     }
 }
 
@@ -425,6 +431,8 @@ fun DetailPage(
     onEdit: () -> Unit, onDelete: () -> Unit, onUnlock: () -> Unit, onBiometric: () -> Unit,
     onOpenPlace: (com.beyondguo.imprints.data.PlaceEntity) -> Unit = {},
     recycleActions: (() -> Unit)? = null,
+    /** 标签 id → 名称。自定义标签名只在库里，所以由上层查询后传入。 */
+    tagNames: Map<String, String> = emptyMap(),
 ) {
     var detail by remember(id) { mutableStateOf<EntryDetail?>(null) }
     var confirmRecycle by remember(id) { mutableStateOf(false) }
@@ -458,8 +466,13 @@ fun DetailPage(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                value.tagIds.forEach { id ->
-                    TagChip(text = TagCatalog.nameOf(id) ?: id, selected = false, enabled = false, onClick = {})
+                value.tagIds.forEach { tagId ->
+                    TagChip(
+                        text = tagNames[tagId] ?: TagCatalog.nameOf(tagId) ?: tagId,
+                        selected = false,
+                        enabled = false,
+                        onClick = {},
+                    )
                 }
             }
         }

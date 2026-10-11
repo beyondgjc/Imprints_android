@@ -1,7 +1,9 @@
 package com.beyondguo.imprints.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -50,8 +52,16 @@ internal fun OutlinePanel(modifier: Modifier = Modifier, content: @Composable ()
  * 标签胶囊。时间线筛选栏与编辑页选择区共用同一套视觉：
  * 选中 = 浅绿底 + 绿字 + 绿描边；未选中 = 白底 + 灰字 + 细描边。
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun TagChip(text: String, selected: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+internal fun TagChip(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onLongClick: (() -> Unit)? = null,
+) {
     Surface(
         shape = RoundedCornerShape(50),
         color = when {
@@ -62,7 +72,7 @@ internal fun TagChip(text: String, selected: Boolean, enabled: Boolean = true, o
         border = BorderStroke(1.dp, if (selected && enabled) Green else Line),
         modifier = Modifier
             .clip(RoundedCornerShape(50))
-            .clickable(enabled = enabled, onClick = onClick),
+            .combinedClickable(enabled = enabled, onClick = onClick, onLongClick = onLongClick),
     ) {
         Text(
             text,

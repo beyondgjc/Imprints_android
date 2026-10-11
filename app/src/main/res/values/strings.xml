@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="action_cancel">取消</string>
+    <string name="action_delete">删除</string>
     <string name="action_confirm">确定</string>
     <string name="action_continue">继续</string>
     <string name="action_got_it">我知道了</string>
@@ -47,7 +48,23 @@
     <string name="timeline_filter_empty_title">这个标签下还没有印迹</string>
     <string name="timeline_filter_empty_sub">取消筛选，或给印迹挂上这个标签。</string>
     <string name="editor_tag_label">标签</string>
-    <string name="editor_tag_hint">可多选，方便日后按类别回顾</string>
+    <string name="editor_tag_hint">可多选，长按可改名或删除</string>
+    <string name="search_hint_short">搜索</string>
+    <string name="a11y_clear_search">清空搜索</string>
+    <string name="tag_sheet_title">选择标签</string>
+    <string name="tag_sheet_done">完成</string>
+    <string name="tag_group_frequent">常用标签</string>
+    <string name="tag_group_mine">我的标签</string>
+    <string name="tag_create">+ 新建标签</string>
+    <string name="tag_create_title">新建标签</string>
+    <string name="tag_rename_title">标签设置</string>
+    <string name="tag_name_hint">给标签起个名字</string>
+    <string name="tag_name_counter">%1$d/%2$d 字</string>
+    <string name="tag_name_too_long">标签名最多 %1$d 个字</string>
+    <string name="tag_limit_reached">标签最多 %1$d 个，删除不用的再新建</string>
+    <string name="tag_delete_title">删除标签「%1$s」？</string>
+    <string name="tag_delete_message">%1$d 条印迹将解除这个标签；印迹本身不会被删除。</string>
+    <string name="timeline_tag_manage">管理</string>
     <string name="timeline_empty_title">留下你的第一条印迹</string>
     <string name="timeline_empty_sub">经历、见闻，或某一刻的感受。</string>
     <string name="action_collapse">收起</string>
@@ -93,6 +110,12 @@
     <string name="settings_import">导入备份</string>
     <string name="settings_recycle">回收站</string>
     <string name="settings_recycle_sub">删除的印迹会保留 7 天</string>
+    <string name="settings_tags">标签管理</string>
+    <string name="settings_tags_sub">改名、删除，或新建自定义标签</string>
+    <string name="tags_page_intro">预置标签可以改名但不能删除；自定义标签删除后，只解除与印迹的关联。</string>
+    <string name="tags_page_empty">还没有自定义标签</string>
+    <string name="tags_entry_count">%1$d 条印迹</string>
+    <string name="tags_preset_badge">预置</string>
     <string name="app_name">印迹</string>
     <string name="pin_label">6 位数字口令</string>
     <string name="pin_confirm_label">再次输入确认口令</string>

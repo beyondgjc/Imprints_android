@@ -14,6 +14,7 @@ import com.beyondguo.imprints.data.ImprintRepository
 import com.beyondguo.imprints.data.PlaceEntity
 import com.beyondguo.imprints.data.TagCatalog
 import com.beyondguo.imprints.data.TagEntity
+import com.beyondguo.imprints.data.TagRules
 import com.beyondguo.imprints.data.VisualMediaEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -193,22 +194,28 @@ class BackupService(private val context: Context, private val database: ImprintD
                         placeMap[originalId] = placeFromJson(raw).copy(id = UUID.randomUUID().toString())
                     }
                 }
-                // 标签按 id 合并（id 即语义，跨设备一致）；未知 id 丢弃，预置标签保留本机既有行
+                // 标签按 id 合并（id 即语义，跨设备一致）。本机已有的 id 不覆盖，
+                // 所以先取本库标签，既用于去重也用于校验 entryTags 的引用完整性。
+                val knownTagIds = dao.tagsOnce().map { it.id }.toSet()
                 val tags = buildList {
                     if (tagsJson != null) {
                         for (i in 0 until tagsJson.length()) {
                             val tag = tagFromJson(tagsJson.getJSONObject(i))
-                            if (TagCatalog.isKnown(tag.id)) add(tag)
+                            // 本机已有同名 id 的行保持不动；新 id 至少要有个非空标签名
+                            if (tag.id !in knownTagIds && TagRules.normalizeName(tag.name).isNotEmpty()) {
+                                add(tag.copy(name = fitTagName(tag.name)))
+                            }
                         }
                     }
                 }.distinctBy { it.id }
+                val importableTagIds = knownTagIds + tags.map { it.id }
                 val entryTags = buildList {
                     if (entryTagsJson != null) {
                         for (i in 0 until entryTagsJson.length()) {
                             val raw = entryTagsJson.getJSONObject(i)
                             val entryId = raw.getString("entryId")
                             val tagId = raw.getString("tagId")
-                            if (entryId in included && TagCatalog.isKnown(tagId)) add(EntryTagEntity(entryId, tagId))
+                            if (entryId in included && tagId in importableTagIds) add(EntryTagEntity(entryId, tagId))
                         }
                     }
                 }.distinctBy { it.entryId to it.tagId }
@@ -414,8 +421,27 @@ class BackupService(private val context: Context, private val database: ImprintD
         j.getString("providerPoiId").takeIf { it.isNotEmpty() })
     private fun tagJson(t: TagEntity) = JSONObject().put("id", t.id).put("name", t.name)
         .put("ordinal", t.ordinal).put("archived", t.archived)
-    private fun tagFromJson(j: JSONObject) = TagEntity(j.getString("id"), j.getString("name"),
-        j.optInt("ordinal", TagCatalog.PRESETS.size), j.optBoolean("archived", false))
+        .put("preset", t.preset).put("createdAtMs", t.createdAtMs)
+    private fun tagFromJson(j: JSONObject): TagEntity {
+        val id = j.getString("id")
+        return TagEntity(
+            id = id,
+            name = j.getString("name"),
+            ordinal = j.optInt("ordinal", 0),
+            archived = j.optBoolean("archived", false),
+            // v1.4 及更早的备份没有 preset 字段：按目录判断，避免用户标签被当成预置而不可删
+            preset = if (j.has("preset")) j.getBoolean("preset") else TagCatalog.isPreset(id),
+            createdAtMs = j.optLong("createdAtMs", 0),
+        )
+    }
+
+    /** 外部备份里的标签名可能超出当前上限；截断而不是丢弃，否则印迹会白丢一个标签关联。 */
+    private fun fitTagName(raw: String): String {
+        val normalized = TagRules.normalizeName(raw)
+        if (TagRules.isValidName(normalized)) return normalized
+        val end = normalized.offsetByCodePoints(0, TagRules.MAX_NAME_LENGTH)
+        return normalized.substring(0, end)
+    }
     private fun entryTagJson(e: EntryTagEntity) = JSONObject().put("entryId", e.entryId).put("tagId", e.tagId)
 
     companion object {

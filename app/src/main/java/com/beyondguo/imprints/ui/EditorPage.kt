@@ -15,8 +15,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -47,6 +45,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -73,9 +72,7 @@ import com.beyondguo.imprints.data.EntryRules
 import com.beyondguo.imprints.data.ImprintRepository
 import com.beyondguo.imprints.data.MediaChoice
 import com.beyondguo.imprints.data.PlaceEntity
-import com.beyondguo.imprints.data.TagCatalog
 import com.beyondguo.imprints.data.TagEntity
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -89,7 +86,6 @@ private data class EditorSnapshot(
     val tagIds: Set<String> = emptySet(),
 )
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EditorPage(
     repository: ImprintRepository, id: String?, epoch: Int,
@@ -126,12 +122,10 @@ fun EditorPage(
     var initial by remember(id) { mutableStateOf<EditorSnapshot?>(null) }
     var exitRequested by remember(id) { mutableStateOf(false) }
     var showEventTimePicker by remember(id) { mutableStateOf(false) }
-    // 标签：availableTags 来自预置标签表，selectedTagIds 是本条的挂载集合（0~N）
+    // 标签：availableTags 订阅标签表（预置 + 自定义），selectedTagIds 是本条的挂载集合（0~N）
     var selectedTagIds by remember(id) { mutableStateOf(emptySet<String>()) }
-    var availableTags by remember { mutableStateOf(emptyList<TagEntity>()) }
-    LaunchedEffect(id) {
-        availableTags = repository.tags.first()
-    }
+    val availableTags by repository.selectableTags.collectAsState(initial = emptyList())
+    var showTagPicker by remember(id) { mutableStateOf(false) }
 
     // 这些文案在 LaunchedEffect / Toast 等非 Composable 回调里被引用，
     // 那里不能调 stringResource，所以在入口先取成局部 val 闭包捕获。
@@ -270,7 +264,7 @@ fun EditorPage(
         scope.launch {
             val draft = EntryDraft(id = id, body = body, eventLocalMinute = eventTime,
                 visuals = visuals.toList(), audio = audio, feeling = feeling,
-                tagIds = TagCatalog.normalizeSelection(selectedTagIds),
+                tagIds = selectedTagIds.toList(),
                 place = selectedPlace ?: placeName.trim().takeIf(String::isNotEmpty)?.let {
                     PlaceEntity(UUID.randomUUID().toString(), it, "", null, null, null, "MANUAL", null)
                 })
@@ -326,27 +320,14 @@ fun EditorPage(
             colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent,
                 unfocusedContainerColor = Color.Transparent, focusedIndicatorColor = Color.Transparent,
                 unfocusedIndicatorColor = Color.Transparent)) }
-        // 标签：预置标签多选（0~N），用于时间线按类别筛选
-        if (availableTags.isNotEmpty()) item {
-            Column(Modifier.fillMaxWidth().padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                TagSectionLabel(stringResource(R.string.editor_tag_label), stringResource(R.string.editor_tag_hint))
-                FlowRow(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    availableTags.forEach { tag ->
-                        TagChip(
-                            text = tag.name,
-                            selected = tag.id in selectedTagIds,
-                            enabled = !tag.archived,
-                            onClick = {
-                                selectedTagIds = if (tag.id in selectedTagIds) selectedTagIds - tag.id else selectedTagIds + tag.id
-                            },
-                        )
-                    }
-                }
-            }
+        // 标签：与声音/位置/事件时间同一套条目行，点按进入「选择标签」面板
+        item {
+            EditorTagRow(
+                tags = availableTags,
+                selectedIds = selectedTagIds,
+                onClick = { showTagPicker = true },
+                onClear = { selectedTagIds = emptySet() },
+            )
         }
         // 媒体：无分区标题、无中间分隔线，直接网格 +「图片/视频」入口
         item {
@@ -511,6 +492,33 @@ fun EditorPage(
                 }
             } else null,
             onDismiss = { showAudioSourceSheet = false },
+        )
+    }
+    if (showTagPicker) {
+        TagPickerSheet(
+            repository = repository,
+            selectedIds = selectedTagIds,
+            onToggle = { id ->
+                selectedTagIds = if (id in selectedTagIds) selectedTagIds - id else selectedTagIds + id
+            },
+            onCreate = { name ->
+                // 新建的标签直接挂到当前印迹上，省一次点选
+                scope.launch {
+                    runCatching { repository.createTag(name) }
+                        .onSuccess { newId -> selectedTagIds = selectedTagIds + newId }
+                        .onFailure(report)
+                }
+            },
+            onRename = { id, name -> scope.launch { runCatching { repository.renameTag(id, name) }.onFailure(report) } },
+            onDelete = { id ->
+                scope.launch {
+                    runCatching { repository.deleteTag(id) }
+                        .onSuccess { selectedTagIds = selectedTagIds - id }
+                        .onFailure(report)
+                }
+            },
+            onDismiss = { showTagPicker = false },
+            onError = report,
         )
     }
 }
@@ -829,7 +837,7 @@ private fun WheelPicker(
 private fun friendlyAudioName(raw: String): String =
     if (raw.matches(Regex("[0-9a-fA-F-]{36}"))) stringResource(R.string.audio_default_name) else raw
 
-internal enum class EditorMetaTrailing { Chevron, Clear, Expand }
+internal enum class EditorMetaTrailing { Chevron, Clear, Expand, ClearThenChevron }
 
 /**
  * 编辑页元信息行（音乐/位置/感受共用）：
@@ -875,6 +883,17 @@ internal fun EditorMetaRow(
             EditorMetaTrailing.Chevron -> Text("›", color = Quiet, fontSize = 20.sp,
                 modifier = Modifier.size(width = 24.dp, height = 40.dp)
                     .wrapContentSize(Alignment.CenterEnd))
+            EditorMetaTrailing.ClearThenChevron -> {
+                // 标签行用：先 ×（清空已选）再 ›（进入选择），与微信一致的收尾
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { onClear?.invoke() }, modifier = Modifier.size(40.dp)) {
+                        Text("×", color = Quiet, fontSize = 22.sp)
+                    }
+                    Text("›", color = Quiet, fontSize = 20.sp,
+                        modifier = Modifier.size(width = 24.dp, height = 40.dp)
+                            .wrapContentSize(Alignment.CenterEnd))
+                }
+            }
             EditorMetaTrailing.Clear -> {
                 IconButton(onClick = { onClear?.invoke() }, modifier = Modifier.size(40.dp)) {
                     Text("×", color = Quiet, fontSize = 22.sp)

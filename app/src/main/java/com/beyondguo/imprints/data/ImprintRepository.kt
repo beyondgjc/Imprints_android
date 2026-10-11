@@ -52,6 +52,8 @@ class ImprintRepository(
     val recycled: Flow<List<EntryEntity>> = dao.recycledEntries()
     /** 预置标签表；时间线筛选栏与编辑页选项都来自这里。 */
     val tags: Flow<List<TagEntity>> = dao.allTags()
+    /** 时间线筛选栏/编辑页可选的标签（不含已停用）。 */
+    val selectableTags: Flow<List<TagEntity>> = dao.activeTags()
     /** 印迹 ↔ 标签关联，供时间线在内存里筛选。 */
     val entryTags: Flow<List<EntryTagEntity>> = dao.allEntryTags()
 
@@ -61,9 +63,56 @@ class ImprintRepository(
         val entry = dao.entry(id) ?: return null
         return EntryDetail(
             entry, dao.visuals(id), dao.audio(id), dao.feeling(id), entry.placeId?.let { dao.place(it) },
-            TagCatalog.normalizeSelection(dao.tagsOf(id)),
+            TagRules.normalizeSelection(dao.tagsOnce(), dao.tagsOf(id)),
         )
     }
+
+    /** 当前可用于新建标签的余量判断依据。 */
+    suspend fun activeTagCount(): Int = dao.activeTagCount()
+
+    /**
+     * 新建自定义标签。名称已存在（忽略首尾空白、大小写与全半角）时**不新建**，
+     * 直接返回已有标签的 id，由调用方把它选中——用户在编辑页想建一个已存在的标签时，
+     * 期望的是「用上它」而不是看到一条报错。
+     * 名称规则与数量上限见 [TagRules]，真正需要新建但校验不过时才抛错。
+     */
+    suspend fun createTag(rawName: String): String = mutation.withLock {
+        val name = TagRules.normalizeName(rawName)
+        val existing = dao.tagsOnce()
+        TagRules.findByName(existing, name)?.let { return@withLock it.id }
+        TagRules.validationError(existing, name)?.let { throw IllegalArgumentException(it) }
+        if (TagRules.hasReachedLimit(dao.activeTagCount())) {
+            throw IllegalStateException("标签最多 ${TagRules.MAX_TAG_COUNT} 个，先删掉不用的再新建")
+        }
+        val id = UUID.randomUUID().toString()
+        dao.insertTag(TagEntity(id = id, name = name, ordinal = 0, preset = false, createdAtMs = System.currentTimeMillis()))
+        id
+    }
+
+    /** 改名；预置标签也可以改名（用户可见文案），但 id 不变、身份仍是预置、不可删除。 */
+    suspend fun renameTag(id: String, rawName: String) = mutation.withLock {
+        val name = TagRules.normalizeName(rawName)
+        TagRules.validationError(dao.tagsOnce(), name, editingId = id)?.let { throw IllegalArgumentException(it) }
+        check(dao.tagsOnce().any { it.id == id }) { "标签已不存在" }
+        dao.renameTag(id, name)
+    }
+
+    /** 删除标签：只解除与印迹的关联，不动印迹本体。预置标签不可删除。 */
+    suspend fun deleteTag(id: String) = mutation.withLock {
+        check(!TagCatalog.isPreset(id)) { "预置标签不可删除" }
+        check(dao.tagsOnce().any { it.id == id }) { "标签已不存在" }
+        database.withTransaction {
+            dao.deleteEntryTagsForTag(id)
+            dao.deleteTag(id)
+        }
+    }
+
+    /** 删除前提示用：该标签已挂载的印迹条数。 */
+    suspend fun entryCountForTag(id: String): Int = dao.entryCountForTag(id)
+
+    /** 「常用标签」用：标签 id → 使用次数，按次数从多到少。 */
+    suspend fun tagUsageCounts(): List<Pair<String, Int>> =
+        dao.tagUsageCounts().sortedByDescending { it.count }.map { it.tagId to it.count }
 
     suspend fun save(draft: EntryDraft): String = mutation.withLock {
         val body = draft.body.trim()
@@ -76,7 +125,7 @@ class ImprintRepository(
         val oldAudio = dao.audio(id)
         val now = System.currentTimeMillis()
         val feeling = security.encodeFeeling(id, draft.feeling)
-        val tagIds = TagCatalog.normalizeSelection(draft.tagIds)
+        val tagIds = TagRules.normalizeSelection(dao.tagsOnce(), draft.tagIds)
         val committedNew = mutableListOf<String>()
         try {
             val visuals = draft.visuals.mapIndexed { ordinal, choice ->

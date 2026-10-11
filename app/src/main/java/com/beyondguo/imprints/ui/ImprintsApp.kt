@@ -74,6 +74,7 @@ private sealed interface Page {
     data object Timeline : Page
     data object Settings : Page
     data object Recycle : Page
+    data object Tags : Page
     data object Search : Page
     data object PrivacyPolicy : Page
     data object UserAgreement : Page
@@ -107,6 +108,9 @@ fun ImprintsApp(
     var securityEpoch by remember { mutableStateOf(0) }
     // 时间线标签筛选：状态放在导航层，进出详情/编辑后仍保留筛选
     var selectedTagIds by remember { mutableStateOf(emptySet<String>()) }
+    // 订阅标签表而不是启动时取一次快照：新建/改名/删除后详情页与筛选栏必须立刻见到新名称
+    val tagList by repository.tags.collectAsState(initial = emptyList())
+    val tagNames = remember(tagList) { tagList.associate { it.id to it.name } }
     val security = repository.security
     val context = LocalContext.current
     val backup = remember(repository) { BackupService(context, ImprintDatabase.get(context), repository) }
@@ -238,6 +242,7 @@ fun ImprintsApp(
     BackHandler(page != Page.Timeline && !locked) {
         page = when (page) {
             is Page.RecycleDetail -> Page.Recycle
+            Page.Tags -> Page.Settings
             is Page.PrivacyPolicy, is Page.UserAgreement -> Page.Settings
             else -> Page.Timeline
         }
@@ -249,6 +254,7 @@ fun ImprintsApp(
             if (page != Page.Timeline && page !is Page.Editor) CenterAlignedTopAppBar(
                 title = { Text(when (page) {
                     Page.Timeline -> stringResource(R.string.timeline_title); Page.Settings -> "设置"; Page.Recycle -> stringResource(R.string.settings_recycle)
+                    Page.Tags -> stringResource(R.string.settings_tags)
                     Page.Search -> pageSearch; is Page.Detail -> pageDetail
                     is Page.RecycleDetail -> pageRecycleDetail
                     is Page.Editor -> if ((page as Page.Editor).id == null) editorNewTitle else editorEditTitle
@@ -259,6 +265,7 @@ fun ImprintsApp(
                 navigationIcon = { IconButton(onClick = {
                     page = when (page) {
                         is Page.RecycleDetail -> Page.Recycle
+                        Page.Tags -> Page.Settings
                         is Page.PrivacyPolicy, is Page.UserAgreement -> Page.Settings
                         else -> Page.Timeline
                     }
@@ -302,9 +309,19 @@ fun ImprintsApp(
                     selectedTagIds = selectedTagIds,
                     onToggleTag = { id ->
                         selectedTagIds = if (id in selectedTagIds) selectedTagIds - id else selectedTagIds + id
-                    })
+                    },
+                    onCreateTag = { name ->
+                        scope.launch {
+                            // 标签表已由 tagList 订阅，这里只需把新标签选中
+                            runCatching { repository.createTag(name) }
+                                .onSuccess { newId -> selectedTagIds = selectedTagIds + newId }
+                                .onFailure(::report)
+                        }
+                    },
+                    onError = ::report)
                 Page.Settings -> SettingsPage(feelingMode, feelingBioEnabled, appLockEnabled, appBioEnabled,
                     onRecycle = { page = Page.Recycle },
+                    onTags = { page = Page.Tags },
                     onFeeling = {
                         if (feelingMode == "OFF") askPin("feeling-enable", pinSetFeeling)
                         else confirmDisableFeeling = true
@@ -376,6 +393,23 @@ fun ImprintsApp(
                         }
                     },
                     onDelete = { confirmDelete = it })
+                Page.Tags -> TagsPage(
+                    repository = repository,
+                    onRename = { id, name ->
+                        scope.launch { runCatching { repository.renameTag(id, name) }.onFailure(::report) }
+                    },
+                    onDelete = { id ->
+                        scope.launch {
+                            runCatching { repository.deleteTag(id) }
+                                .onSuccess { selectedTagIds = selectedTagIds - id }
+                                .onFailure(::report)
+                        }
+                    },
+                    onCreate = { name ->
+                        scope.launch { runCatching { repository.createTag(name) }.onFailure(::report) }
+                    },
+                    onError = ::report,
+                )
                 Page.Search -> SearchPage(repository, onOpen = {
                     pendingScrollToId = it
                     page = Page.Timeline
@@ -399,7 +433,8 @@ fun ImprintsApp(
                             onUnavailable = { askPin("feeling-unlock", pinUnlockFeeling) },
                         )
                     },
-                    onOpenPlace = { place -> page = Page.LocationDetail(place) })
+                    onOpenPlace = { place -> page = Page.LocationDetail(place) },
+                    tagNames = tagNames)
                 is Page.RecycleDetail -> DetailPage(repository, current.id, revealEpoch + securityEpoch,
                     onEdit = {},
                     onDelete = {
@@ -418,6 +453,7 @@ fun ImprintsApp(
                         )
                     },
                     onOpenPlace = { place -> page = Page.LocationDetail(place) },
+                    tagNames = tagNames,
                     recycleActions = {
                         scope.launch {
                             runCatching { repository.restore(current.id) }
@@ -680,7 +716,7 @@ private fun PinDialog(title: String, setup: Boolean, onDismiss: () -> Unit, onCo
 @Composable
 private fun SettingsPage(
     feelingMode: String, feelingBio: Boolean, appLock: Boolean, appBio: Boolean,
-    onRecycle: () -> Unit, onFeeling: () -> Unit, onFeelingBio: () -> Unit, onFeelingPinChange: () -> Unit,
+    onRecycle: () -> Unit, onTags: () -> Unit, onFeeling: () -> Unit, onFeelingBio: () -> Unit, onFeelingPinChange: () -> Unit,
     onAppLock: () -> Unit, onAppBio: () -> Unit, onAppPinChange: () -> Unit,
     onLockNow: () -> Unit,
     onExport: () -> Unit, onImport: () -> Unit,
@@ -787,6 +823,8 @@ private fun SettingsPage(
                 SettingsRow(stringResource(R.string.settings_export), stringResource(R.string.settings_export_sub), onClick = onExport)
                 FineDivider()
                 SettingsRow(stringResource(R.string.settings_import), stringResource(R.string.settings_import_sub), onClick = onImport)
+                FineDivider()
+                SettingsRow(stringResource(R.string.settings_tags), stringResource(R.string.settings_tags_sub), onClick = onTags)
                 FineDivider()
                 SettingsRow(stringResource(R.string.settings_recycle), stringResource(R.string.settings_recycle_sub), onClick = onRecycle)
             }

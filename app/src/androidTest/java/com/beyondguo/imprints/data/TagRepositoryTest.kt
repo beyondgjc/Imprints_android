@@ -16,8 +16,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * 标签体系（真机/模拟器内存库）：
- * 覆盖 Room 映射、保存归一化、外键级联与时间线筛选所依赖的关联查询。
+ * 标签挂载与时间线筛选（真机/模拟器内存库）：
+ * 覆盖 Room 映射、保存归一化、外键级联与筛选所依赖的关联查询。
  */
 @RunWith(AndroidJUnit4::class)
 class TagRepositoryTest {
@@ -27,7 +27,10 @@ class TagRepositoryTest {
     @Before
     fun setUp() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        db = Room.inMemoryDatabaseBuilder(context, ImprintDatabase::class.java).build()
+        // 与生产同一条建库路径：预置标签由 SEED_TAGS_ON_CREATE 落库
+        db = Room.inMemoryDatabaseBuilder(context, ImprintDatabase::class.java)
+            .addCallback(ImprintDatabase.SEED_TAGS_ON_CREATE)
+            .build()
         repository = ImprintRepository(db, MediaFiles(context), ImprintSecurity(db))
     }
 
@@ -42,35 +45,32 @@ class TagRepositoryTest {
         tagIds = tags,
     )
 
+    /** 预置标签 id 按 ordinal 取，避免测试硬编码具体中文名。 */
+    private suspend fun presetId(index: Int) = db.dao().tagsOnce().first { it.preset && it.ordinal == index }.id
+
     @Test
-    fun presetTagsArePersistedBySeedPath() = runBlocking {
-        // 内存库由 Room 直接建表，不跑迁移；这里显式落 seed，验证实体映射与查询可用
-        db.dao().insertTags(TagCatalog.seed)
-        val stored = repository.tags.first()
+    fun presetTagsAreAvailableOutOfTheBox() = runBlocking {
+        val stored = repository.selectableTags.first()
         assertEquals(TagCatalog.PRESETS.size, stored.size)
-        assertEquals(TagCatalog.selectableIds, stored.sortedBy { it.ordinal }.map { it.id })
-        assertTrue(stored.none { it.archived })
+        assertEquals(TagCatalog.PRESETS.map { it.id }, stored.map { it.id })
+        assertTrue(stored.all { it.preset })
     }
 
     @Test
     fun saveAttachesTagsAndDetailReturnsThemInCatalogOrder() = runBlocking {
-        db.dao().insertTags(TagCatalog.seed)
-        val a = TagCatalog.selectableIds[0]
-        val b = TagCatalog.selectableIds[1]
+        val a = presetId(0)
+        val b = presetId(1)
         val id = repository.save(draft("同时挂两个标签", listOf(b, a)))
         // detail 按目录顺序归一化，与传入顺序无关
         assertEquals(listOf(a, b), repository.detail(id)!!.tagIds)
-        assertEquals(
-            listOf(a, b),
-            repository.entryTags.first().filter { it.entryId == id }.map { it.tagId }.sortedBy { TagCatalog.selectableIds.indexOf(it) },
-        )
+        val attached = repository.entryTags.first().filter { it.entryId == id }.map { it.tagId }
+        assertEquals(setOf(a, b), attached.toSet())
     }
 
     @Test
     fun saveReplacesTagsInsteadOfAppending() = runBlocking {
-        db.dao().insertTags(TagCatalog.seed)
-        val a = TagCatalog.selectableIds[0]
-        val b = TagCatalog.selectableIds[1]
+        val a = presetId(0)
+        val b = presetId(1)
         val id = repository.save(draft("第一版", listOf(a)))
         repository.save(draft("第二版", listOf(b)).copy(id = id))
         assertEquals(listOf(b), repository.detail(id)!!.tagIds)
@@ -78,15 +78,13 @@ class TagRepositoryTest {
 
     @Test
     fun unknownAndDuplicateTagsAreDropped() = runBlocking {
-        db.dao().insertTags(TagCatalog.seed)
-        val a = TagCatalog.selectableIds[0]
+        val a = presetId(0)
         val id = repository.save(draft("脏数据", listOf(a, a, "not-a-tag", "")))
         assertEquals(listOf(a), repository.detail(id)!!.tagIds)
     }
 
     @Test
     fun saveWithoutTagsLeavesNoRows() = runBlocking {
-        db.dao().insertTags(TagCatalog.seed)
         val id = repository.save(draft("没有标签"))
         assertTrue(repository.detail(id)!!.tagIds.isEmpty())
         assertTrue(repository.entryTags.first().none { it.entryId == id })
@@ -94,9 +92,8 @@ class TagRepositoryTest {
 
     @Test
     fun timelineFilterMatchesSelectedTags() = runBlocking {
-        db.dao().insertTags(TagCatalog.seed)
-        val personal = TagCatalog.selectableIds[0]
-        val national = TagCatalog.selectableIds[1]
+        val personal = presetId(0)
+        val national = presetId(1)
         val untagged = repository.save(draft("自己的经历"))
         val mine = repository.save(draft("我的经历", listOf(personal)))
         val news = repository.save(draft("大事", listOf(national)))
@@ -117,19 +114,17 @@ class TagRepositoryTest {
 
     @Test
     fun permanentDeleteCascadesEntryTags() = runBlocking {
-        db.dao().insertTags(TagCatalog.seed)
-        val id = repository.save(draft("会被彻底删除", listOf(TagCatalog.selectableIds[0])))
+        val id = repository.save(draft("会被彻底删除", listOf(presetId(0))))
         repository.deletePermanently(id)
         // 外键 CASCADE：不留孤儿关联行
         assertTrue(repository.entryTags.first().none { it.entryId == id })
         // 标签本身保留，供后续印迹继续使用
-        assertEquals(TagCatalog.PRESETS.size, repository.tags.first().size)
+        assertEquals(TagCatalog.PRESETS.size, repository.selectableTags.first().size)
     }
 
     @Test
     fun movingToRecycleKeepsTagsForRestore() = runBlocking {
-        db.dao().insertTags(TagCatalog.seed)
-        val tag = TagCatalog.selectableIds[0]
+        val tag = presetId(0)
         val id = repository.save(draft("进回收站", listOf(tag)))
         repository.moveToRecycle(id)
         repository.restore(id)
