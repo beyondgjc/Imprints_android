@@ -8,6 +8,7 @@ import hashlib
 import os
 import sqlite3
 import sys
+import time
 import uuid
 
 db_path = sys.argv[1]
@@ -20,7 +21,9 @@ cur = conn.cursor()
 for t in ("entry_tags", "feelings", "visual_media", "audio", "entries"):
     cur.execute(f"DELETE FROM {t}")
 
-now = 1786000000000  # 固定基准，避免每次生成都不同
+# 必须是"当前时间"：回收站的回收保留期按 deletedAtMs 判定，
+# 用固定基准会让条目看起来是几个月前删的，一启动就被清理任务删掉。
+now = int(time.time() * 1000)
 
 # 三条印迹：一条带感受（刮卡截图用）、两条用于时间线分组与标签筛选
 entries = [
@@ -48,6 +51,49 @@ entries = [
         "feeling": None,
         "media": ["bread"],
     },
+    # 更早月份的印迹：让「时间穿梭」月历上有多个绿点
+    {
+        "id": "seed-04",
+        "body": "把去年的日历撕下来，换上新的一本。第一页空着，看着挺舒服。",
+        "minute": "2026-01-06T09:12",
+        "tags": ["personal"],
+        "feeling": None,
+    },
+    {
+        "id": "seed-05",
+        "body": "楼下的玉兰先开了两朵，其余的还在憋着。",
+        "minute": "2026-03-11T17:40",
+        "tags": ["personal", "travel"],
+        "feeling": None,
+    },
+    {
+        "id": "seed-06",
+        "body": "第一次自己修好了漏水的水龙头，拧紧那一刻特别有成就感。",
+        "minute": "2026-05-17T21:05",
+        "tags": ["personal"],
+        "feeling": None,
+    },
+    {
+        "id": "seed-07",
+        "body": "连着下了三天雨，阳台的衣服一直没干透。",
+        "minute": "2026-07-22T08:30",
+        "tags": ["personal"],
+        "feeling": None,
+    },
+    {
+        "id": "seed-08",
+        "body": "把用了六年的旧手机里的照片导出来，一万多张，翻了一晚上。",
+        "minute": "2026-08-14T23:18",
+        "tags": ["personal", "work"],
+        "feeling": None,
+    },
+]
+
+# 回收站条目：删除时间错开，让「剩余 N 天」有层次（约 1 / 3 / 6 天前删的）
+recycled = [
+    ("trash-1", "买错型号的数据线，退货运费比线还贵，算了。", "2026-10-10T14:20", now - 1 * 86400000),
+    ("trash-2", "记错的开会时间，白跑一趟公司。", "2026-10-08T09:00", now - 3 * 86400000),
+    ("trash-3", "草稿：本来想写点什么，写到一半忘了要说啥。", "2026-10-05T22:40", now - 6 * 86400000),
 ]
 
 for index, item in enumerate(entries):
@@ -62,12 +108,21 @@ for index, item in enumerate(entries):
         "INSERT OR REPLACE INTO entry_fts (entryId, body) VALUES (?,?)",
         (item["id"], item["body"]),
     )
-    if item["feeling"]:
+    if item.get("feeling"):
         # 明文模式：encoding=PLAIN，payload 就是原文（与 ImprintSecurity.encodeFeeling 一致）
         cur.execute(
             "INSERT OR REPLACE INTO feelings (entryId, encoding, payload) VALUES (?,?,?)",
             (item["id"], "PLAIN", item["feeling"]),
         )
+
+# 回收站：deletedAtMs 非空即视为在回收站，附件与标签都可不带
+for index, (eid, body, minute, deleted_at) in enumerate(recycled):
+    cur.execute(
+        "INSERT OR REPLACE INTO entries (id, body, eventLocalMinute, eventZoneId, createdAtMs, updatedAtMs, deletedAtMs, placeId) "
+        "VALUES (?,?,?,?,?,?,?,NULL)",
+        (eid, body, minute, "Asia/Shanghai", deleted_at - 3600000, deleted_at - 3600000, deleted_at),
+    )
+    cur.execute("INSERT OR REPLACE INTO entry_fts (entryId, body) VALUES (?,?)", (eid, body))
 
 # 媒体：每条印迹按 media 键挂对应图片。文件名必须是 36 位 UUID（MediaFiles.resolve 的要求），
 # 宿主侧把 UUID 与图片的对应关系写在 media-map.txt 里，安装脚本据此落盘。
@@ -108,6 +163,10 @@ conn.close()
 conn = sqlite3.connect(db_path)
 cur = conn.cursor()
 print("entries =", cur.execute("SELECT COUNT(*) FROM entries").fetchone()[0])
+print("  活跃   =", cur.execute("SELECT COUNT(*) FROM entries WHERE deletedAtMs IS NULL").fetchone()[0])
+print("  回收站 =", cur.execute("SELECT COUNT(*) FROM entries WHERE deletedAtMs IS NOT NULL").fetchone()[0])
+print("月份分布 =", [r[0] for r in cur.execute(
+    "SELECT DISTINCT substr(eventLocalMinute,1,7) FROM entries WHERE deletedAtMs IS NULL ORDER BY 1")])
 print("entry_tags =", cur.execute("SELECT COUNT(*) FROM entry_tags").fetchone()[0])
 print("feelings =", cur.execute("SELECT COUNT(*) FROM feelings").fetchone()[0])
 print("visual_media =", cur.execute("SELECT COUNT(*) FROM visual_media").fetchone()[0])
