@@ -11,5 +11,12 @@ object DebugSeedBridge {
     @Volatile
     var provider: (() -> String?)? = null
 
+    /**
+     * 每次广播递增，用于让消费方的 LaunchedEffect 重新触发。
+     * 单靠 `LaunchedEffect(Unit)` 只在首次进入页面时读一次，反复进出会失效。
+     */
+    @Volatile
+    var revision: Int = 0
+
     fun prefillSearch(): String? = provider?.invoke()
 }

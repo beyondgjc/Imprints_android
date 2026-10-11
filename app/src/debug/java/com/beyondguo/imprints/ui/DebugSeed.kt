@@ -36,15 +36,19 @@ object DebugSeed {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
                 prefillSearch = intent?.getStringExtra("search")
+                // 递增序号：消费方据此重新触发 LaunchedEffect
+                DebugSeedBridge.revision += 1
             }
         }
         val filter = IntentFilter(ACTION_PREFILL)
         val appContext = context.applicationContext
+        // 必须 RECEIVER_EXPORTED：RECEIVER_NOT_EXPORTED 会要求发送方持有
+        // DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION，而 adb shell(uid 2000) 没有它，
+        // 广播会被 "Permission Denial" 直接丢掉。这里靠动作名区分，且只在 debug 构建存在。
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            // 只给 debug 用且不对外暴露；adb/shell 发出的广播仍可送达
-            appContext.registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            appContext.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
         } else {
-            ContextCompat.registerReceiver(appContext, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+            ContextCompat.registerReceiver(appContext, receiver, filter, ContextCompat.RECEIVER_EXPORTED)
         }
     }
 }

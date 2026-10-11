@@ -953,8 +953,10 @@ private fun SearchPage(repository: ImprintRepository, onOpen: (String) -> Unit,
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf(emptyList<EntryEntity>()) }
     val focusRequester = remember { androidx.compose.ui.focus.FocusRequester() }
-    // 仅 debug：支持用 adb 广播预填搜索词（中文无法通过 input text 注入），供截图与手工验收
-    LaunchedEffect(Unit) {
+    // 仅 debug：支持用 adb 广播预填搜索词（中文无法通过 input text 注入），供截图与手工验收。
+    // 以 revision 为 key，重复进出搜索页也能重新读取。
+    val debugRevision = DebugSeedBridge.revision
+    LaunchedEffect(debugRevision) {
         DebugSeedBridge.prefillSearch()?.let { query = it }
     }
     LaunchedEffect(query) {
