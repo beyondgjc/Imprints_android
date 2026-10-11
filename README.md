@@ -43,6 +43,7 @@ app/src/main/java/com/beyondguo/imprints/
 - **标签自定义进行中**（2026-10-10，未打 release）：数据库 **version 4**，JVM 单测 **53** 项、设备测试 **41** 项（模拟器 + MI 8 各一遍）全部通过。详见下方「标签：预置 + 用户自定义」。
 - Git：独立仓；远端 **GitHub 私有** `beyondgjc/Imprints_android`。勿提交 `local.properties` / keystore / 口令。
 - 高德 Key 在本机 `local.properties`（勿提交）。地图/POI 使用 `3dmap-location-search`（MAP so **16KB 对齐**）。
+- **POI 关键字检索已实测可用**（2026-10-12，MI 8 真机输入 `Starbucks` 返回真实结果），说明 Key 已绑定当前签名；换签名需在高德控制台重新绑定。
 - 真机：MI 8 实测选图回锁、系统录音机、生物识别弹窗、位置详情地图；加密/备份等以设备冒烟为准。
 
 ## 标签：预置 + 用户自定义（2026-10-10：已编码 + 编译 + 单测 + 设备测试，未打 release）
