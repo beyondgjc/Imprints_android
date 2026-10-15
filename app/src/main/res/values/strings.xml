@@ -48,6 +48,8 @@
     <string name="timeline_filter_empty_title">这个标签下还没有印迹</string>
     <string name="timeline_filter_empty_sub">取消筛选，或给印迹挂上这个标签。</string>
     <string name="editor_tag_label">标签</string>
+    <!-- 编辑页标签行未选中时的提示文案；设置里的分区标题继续用 editor_tag_label -->
+    <string name="editor_tag_add_label">添加标签</string>
     <string name="editor_tag_hint">可多选，长按可改名或删除</string>
     <string name="search_hint_short">搜索</string>
     <string name="a11y_clear_search">清空搜索</string>

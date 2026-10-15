@@ -86,7 +86,7 @@ fun EditorTagRow(
             )
         },
         leadingTint = if (hasSelection) Green else null,
-        title = if (hasSelection) label else stringResource(R.string.editor_tag_label),
+        title = if (hasSelection) label else stringResource(R.string.editor_tag_add_label),
         subtitle = null,
         titleColor = if (hasSelection) Green else Quiet,
         onClick = onClick,
