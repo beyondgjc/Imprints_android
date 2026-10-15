@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -566,27 +567,39 @@ fun TagsPage(
     }
 }
 
-/** 时间线顶部的筛选 chip 行：多选叠加（OR），全部未选 = 显示全部。 */
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * 时间线顶部的筛选 chip 行：固定单行、横向滚动，不再随标签增多向下换行。
+ * 首位是「全部」——未选任何标签时它处于选中态，点它即清空筛选，因此不需要额外的清除入口。
+ * [tags] 由调用方按使用频次降序排好，顺序即从左到右的展示顺序。
+ */
 @Composable
 fun TagFilterRow(
     tags: List<TagEntity>,
     selectedIds: Set<String>,
     onToggle: (String) -> Unit,
+    onClear: () -> Unit,
     onCreate: () -> Unit,
     createDisabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    FlowRow(
+    LazyRow(
         modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        tags.forEach { tag ->
+        item(key = "all") {
+            TagChip(
+                text = stringResource(R.string.tag_filter_all),
+                selected = selectedIds.isEmpty(),
+                onClick = onClear,
+            )
+        }
+        items(tags, key = { it.id }) { tag ->
             TagChip(text = tag.name, selected = tag.id in selectedIds, onClick = { onToggle(tag.id) })
         }
         if (!createDisabled) {
-            TagChip(text = stringResource(R.string.tag_create), selected = false, onClick = onCreate)
+            item(key = "create") {
+                TagChip(text = stringResource(R.string.tag_create), selected = false, onClick = onCreate)
+            }
         }
     }
 }

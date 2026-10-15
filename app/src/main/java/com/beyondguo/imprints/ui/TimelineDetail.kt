@@ -104,6 +104,8 @@ fun TimelinePage(
     /** 已选中的标签 id；空集合 = 显示全部。状态由上层持有，便于导航往返后保留筛选。 */
     selectedTagIds: Set<String> = emptySet(),
     onToggleTag: (String) -> Unit = {},
+    /** 点「全部」时清空筛选。 */
+    onClearTags: () -> Unit = {},
     onCreateTag: (String) -> Unit = {},
     onError: (Throwable) -> Unit = {},
 ) {
@@ -123,6 +125,15 @@ fun TimelinePage(
     var onFilterCreateTag by remember { mutableStateOf(false) }
     // 标签筛选在内存里做：条目数有限，避免为每种筛选组合再写一套 DAO 查询
     val selectableTags = repository.selectableTags.collectAsState(initial = emptyList()).value
+    // chip 顺序按使用频次降序：越常用越靠左，横滚区里更容易够到。
+    // 频次为 0 或并列的标签保持 selectableTags 原序（预置在前、自定义按创建时间，见 TagRules.TAG_ORDER）。
+    var tagUsage by remember { mutableStateOf(emptyMap<String, Int>()) }
+    LaunchedEffect(selectableTags.map { it.id }, entries) {
+        tagUsage = repository.tagUsageCounts().toMap()
+    }
+    val orderedTags = remember(selectableTags, tagUsage) {
+        selectableTags.sortedByDescending { tagUsage[it.id] ?: 0 }
+    }
     val tagSelection = repository.entryTags.collectAsState(initial = emptyList()).value
         .groupBy({ it.entryId }, { it.tagId })
     val visibleEntries = remember(entries, tagSelection, selectedTagIds) {
@@ -187,11 +198,12 @@ fun TimelinePage(
                     Text(stringResource(R.string.timeline_title), Modifier.weight(1f), color = Ink, fontSize = 34.sp, fontWeight = FontWeight.Bold)
                     IconButton(onClick = onSettings) { Icon(Icons.Default.MoreVert, stringResource(R.string.a11y_settings), tint = Quiet) }
                 }
-                // 标签筛选：多选叠加（OR），全部未选 = 显示全部
+                // 标签筛选：单行横向滚动，首位「全部」= 未筛选，多选仍为叠加（OR）
                 TagFilterRow(
-                    tags = selectableTags,
+                    tags = orderedTags,
                     selectedIds = selectedTagIds,
                     onToggle = onToggleTag,
+                    onClear = onClearTags,
                     onCreate = { onFilterCreateTag = true },
                     createDisabled = com.beyondguo.imprints.data.TagRules.hasReachedLimit(selectableTags.size),
                 )

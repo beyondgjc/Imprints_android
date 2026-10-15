@@ -310,6 +310,7 @@ fun ImprintsApp(
                     onToggleTag = { id ->
                         selectedTagIds = if (id in selectedTagIds) selectedTagIds - id else selectedTagIds + id
                     },
+                    onClearTags = { selectedTagIds = emptySet() },
                     onCreateTag = { name ->
                         scope.launch {
                             // 标签表已由 tagList 订阅，这里只需把新标签选中

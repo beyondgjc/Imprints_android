@@ -57,6 +57,7 @@
     <string name="tag_sheet_done">完成</string>
     <string name="tag_group_frequent">常用标签</string>
     <string name="tag_group_mine">我的标签</string>
+    <string name="tag_filter_all">全部</string>
     <string name="tag_create">+ 新建标签</string>
     <string name="tag_create_title">新建标签</string>
     <string name="tag_rename_title">标签设置</string>
