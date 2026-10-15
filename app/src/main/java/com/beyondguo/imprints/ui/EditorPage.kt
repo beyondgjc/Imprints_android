@@ -314,21 +314,12 @@ fun EditorPage(
         verticalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp),
     ) {
-        // 正文 → 图片/媒体 → 音频 → 位置 → 事件时间 → 感受
+        // 正文 → 图片/媒体 → 音频 → 位置 → 标签 → 事件时间 → 感受
         item { TextField(body, { body = it }, placeholder = { Text(stringResource(R.string.editor_body_hint), color = Quiet) },
             modifier = Modifier.fillMaxWidth(), minLines = 5, textStyle = androidx.compose.ui.text.TextStyle(fontSize = 18.sp, lineHeight = 29.sp, color = Ink),
             colors = TextFieldDefaults.colors(focusedContainerColor = Color.Transparent,
                 unfocusedContainerColor = Color.Transparent, focusedIndicatorColor = Color.Transparent,
                 unfocusedIndicatorColor = Color.Transparent)) }
-        // 标签：与声音/位置/事件时间同一套条目行，点按进入「选择标签」面板
-        item {
-            EditorTagRow(
-                tags = availableTags,
-                selectedIds = selectedTagIds,
-                onClick = { showTagPicker = true },
-                onClear = { selectedTagIds = emptySet() },
-            )
-        }
         // 媒体：无分区标题、无中间分隔线，直接网格 +「图片/视频」入口
         item {
             EditorMediaGrid(
@@ -411,7 +402,16 @@ fun EditorPage(
                 )
             }
         }
-        // 事件时间：与音乐/位置同一套 Meta 行，位于位置下方
+        // 添加标签：位于位置下方，与声音/位置/事件时间同一套条目行，点按进入「选择标签」面板
+        item {
+            EditorTagRow(
+                tags = availableTags,
+                selectedIds = selectedTagIds,
+                onClick = { showTagPicker = true },
+                onClear = { selectedTagIds = emptySet() },
+            )
+        }
+        // 事件时间：与音乐/位置/标签同一套 Meta 行，位于标签下方
         item {
             EditorMetaRow(
                 leadingContent = {
