@@ -254,7 +254,7 @@ interface ImprintDao {
 
 @Database(
     entities = [EntryEntity::class, VisualMediaEntity::class, AudioEntity::class, FeelingEntity::class, PlaceEntity::class, SecurityStateEntity::class, EntryFtsEntity::class, TagEntity::class, EntryTagEntity::class],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class ImprintDatabase : RoomDatabase() {
@@ -298,7 +298,8 @@ abstract class ImprintDatabase : RoomDatabase() {
 
         /**
          * v3→v4：标签支持用户自定义。新增 `preset`（预置/自定义）与 `createdAtMs`（自定义标签排序）。
-         * 已有的 5 个预置标签按 id 回填为 preset = 1、createdAtMs = 0，展示顺序不变。
+         * 已有的预置标签按 id 回填为 preset = 1、createdAtMs = 0，展示顺序不变
+         * （v5 起预置标签收敛为三个，本步只是过渡，启停与改名由 [MIGRATION_4_5] 收口）。
          */
         internal val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -308,6 +309,37 @@ abstract class ImprintDatabase : RoomDatabase() {
                     db.execSQL(
                         "UPDATE `tags` SET `preset` = 1, `createdAtMs` = 0, `ordinal` = ? WHERE `id` = ?",
                         arrayOf<Any>(preset.ordinal, preset.id),
+                    )
+                }
+            }
+        }
+
+        /**
+         * v4→v5：预置标签收敛为「家事 / 国事 / 天下事」三个。
+         *
+         * 旧库里的 personal / national / internet 三行只更新展示名与序号，行本身保留——
+         * 它们可能已被印迹引用，换 id 会丢掉挂载关系；「工作 / 旅行」两行改为停用
+         * （archived = 1），既不从选择与筛选里出现，也不破坏历史挂载与旧备份。
+         *
+         * 用 INSERT OR IGNORE + UPDATE 而非只 UPDATE：极旧的库若缺行也能补齐（正常路径下它们已存在）。
+         */
+        internal val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                TagCatalog.seed.forEach { tag ->
+                    db.execSQL(
+                        "INSERT OR IGNORE INTO `tags` (`id`, `name`, `ordinal`, `archived`, `preset`, `createdAtMs`) VALUES (?, ?, ?, ?, ?, ?)",
+                        arrayOf<Any>(tag.id, tag.name, tag.ordinal, if (tag.archived) 1 else 0, if (tag.preset) 1 else 0, tag.createdAtMs),
+                    )
+                    db.execSQL(
+                        "UPDATE `tags` SET `name` = ?, `ordinal` = ?, `archived` = 0 WHERE `id` = ?",
+                        arrayOf<Any>(tag.name, tag.ordinal, tag.id),
+                    )
+                }
+                val retiredIds = TagCatalog.presetIds - TagCatalog.PRESETS.map { it.id }.toSet()
+                retiredIds.sorted().forEachIndexed { i, id ->
+                    db.execSQL(
+                        "UPDATE `tags` SET `archived` = 1, `ordinal` = ? WHERE `id` = ?",
+                        arrayOf<Any>(TagCatalog.RETIRED_ORDINAL_BASE + i, id),
                     )
                 }
             }
@@ -333,7 +365,7 @@ abstract class ImprintDatabase : RoomDatabase() {
 
         fun get(context: Context): ImprintDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, ImprintDatabase::class.java, "imprints.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .addCallback(SEED_TAGS_ON_CREATE)
                 .build().also { instance = it }
         }
