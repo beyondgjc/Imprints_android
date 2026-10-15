@@ -569,8 +569,9 @@ fun TagsPage(
 
 /**
  * 时间线顶部的筛选 chip 行：固定单行、横向滚动，不再随标签增多向下换行。
- * 首位是「全部」——未选任何标签时它处于选中态，点它即清空筛选，因此不需要额外的清除入口。
- * [tags] 由调用方按使用频次降序排好，顺序即从左到右的展示顺序。
+ * 首位「全部」——未选任何标签时它处于选中态，点它即清空筛选，因此不需要额外的清除入口。
+ * [tags] 由调用方按使用频次降序排好；本行只铺前 [maxChips] 个，剩下的交给末尾「更多」。
+ * 「更多」打开完整的标签面板（搜索、计数、新建、改名、删除都在那里）。
  */
 @Composable
 fun TagFilterRow(
@@ -578,9 +579,9 @@ fun TagFilterRow(
     selectedIds: Set<String>,
     onToggle: (String) -> Unit,
     onClear: () -> Unit,
-    onCreate: () -> Unit,
-    createDisabled: Boolean,
+    onMore: () -> Unit,
     modifier: Modifier = Modifier,
+    maxChips: Int = 6,
 ) {
     LazyRow(
         modifier.fillMaxWidth(),
@@ -593,13 +594,15 @@ fun TagFilterRow(
                 onClick = onClear,
             )
         }
-        items(tags, key = { it.id }) { tag ->
+        items(tags.take(maxChips), key = { it.id }) { tag ->
             TagChip(text = tag.name, selected = tag.id in selectedIds, onClick = { onToggle(tag.id) })
         }
-        if (!createDisabled) {
-            item(key = "create") {
-                TagChip(text = stringResource(R.string.tag_create), selected = false, onClick = onCreate)
-            }
+        item(key = "more") {
+            TagChip(
+                text = stringResource(R.string.tag_filter_more),
+                selected = false,
+                onClick = onMore,
+            )
         }
     }
 }

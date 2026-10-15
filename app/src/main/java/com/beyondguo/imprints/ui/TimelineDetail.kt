@@ -107,6 +107,8 @@ fun TimelinePage(
     /** 点「全部」时清空筛选。 */
     onClearTags: () -> Unit = {},
     onCreateTag: (String) -> Unit = {},
+    onRenameTag: (String, String) -> Unit = { _, _ -> },
+    onDeleteTag: (String) -> Unit = {},
     onError: (Throwable) -> Unit = {},
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -122,7 +124,7 @@ fun TimelinePage(
     val listState = rememberLazyListState()
     var details by remember { mutableStateOf(emptyMap<String, EntryDetail>()) }
     var showTimeTravel by remember { mutableStateOf(false) }
-    var onFilterCreateTag by remember { mutableStateOf(false) }
+    var showTagPanel by remember { mutableStateOf(false) }
     // 标签筛选在内存里做：条目数有限，避免为每种筛选组合再写一套 DAO 查询
     val selectableTags = repository.selectableTags.collectAsState(initial = emptyList()).value
     // chip 顺序按使用频次降序：越常用越靠左，横滚区里更容易够到。
@@ -204,8 +206,7 @@ fun TimelinePage(
                     selectedIds = selectedTagIds,
                     onToggle = onToggleTag,
                     onClear = onClearTags,
-                    onCreate = { onFilterCreateTag = true },
-                    createDisabled = com.beyondguo.imprints.data.TagRules.hasReachedLimit(selectableTags.size),
+                    onMore = { showTagPanel = true },
                 )
             }
         }
@@ -412,17 +413,17 @@ fun TimelinePage(
         }
     }
 
-    // 筛选栏的新建入口：这里只负责把标签建出来并让上层选中它
-    if (onFilterCreateTag) {
-        TagNameDialog(
-            title = stringResource(R.string.tag_create_title),
-            initial = "",
-            confirmLabel = stringResource(R.string.action_confirm),
-            onDismiss = { onFilterCreateTag = false },
-            onConfirm = { name ->
-                runCatching { onCreateTag(name) }.onFailure(onError)
-                onFilterCreateTag = false
-            },
+    // 「更多」→ 完整标签面板：搜索、计数、新建、改名、删除都在这里
+    if (showTagPanel) {
+        TagPickerSheet(
+            repository = repository,
+            selectedIds = selectedTagIds,
+            onToggle = onToggleTag,
+            onCreate = onCreateTag,
+            onRename = onRenameTag,
+            onDelete = onDeleteTag,
+            onDismiss = { showTagPanel = false },
+            onError = onError,
         )
     }
     }

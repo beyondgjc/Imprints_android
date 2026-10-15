@@ -319,6 +319,16 @@ fun ImprintsApp(
                                 .onFailure(::report)
                         }
                     },
+                    onRenameTag = { id, name ->
+                        scope.launch { runCatching { repository.renameTag(id, name) }.onFailure(::report) }
+                    },
+                    onDeleteTag = { id ->
+                        scope.launch {
+                            runCatching { repository.deleteTag(id) }
+                                .onSuccess { selectedTagIds = selectedTagIds - id }
+                                .onFailure(::report)
+                        }
+                    },
                     onError = ::report)
                 Page.Settings -> SettingsPage(feelingMode, feelingBioEnabled, appLockEnabled, appBioEnabled,
                     onRecycle = { page = Page.Recycle },
