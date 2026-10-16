@@ -82,6 +82,7 @@ import com.beyondguo.imprints.data.ImprintRepository
 import com.beyondguo.imprints.data.PlaceEntity
 import com.beyondguo.imprints.data.TagCatalog
 import com.beyondguo.imprints.data.TagRules
+import com.beyondguo.imprints.review.ReviewPeriods
 import kotlinx.coroutines.launch
 
 import kotlinx.coroutines.delay
@@ -110,6 +111,15 @@ fun TimelinePage(
     onCreateTag: (String) -> Unit = {},
     onRenameTag: (String, String) -> Unit = { _, _ -> },
     onDeleteTag: (String) -> Unit = {},
+    /** 到期未读信（首页送达区）；不受标签筛选影响 */
+    reminderLetters: List<com.beyondguo.imprints.data.LetterListRow> = emptyList(),
+    reviewInvitation: Pair<String, com.beyondguo.imprints.review.DateRange>? = null,
+    onOpenEnvelope: (String) -> Unit = {},
+    onOpenMail: () -> Unit = {},
+    onOpenReviewInvitation: (String, com.beyondguo.imprints.review.DateRange) -> Unit = { _, _ -> },
+    onDismissReviewInvitation: (String, com.beyondguo.imprints.review.DateRange) -> Unit = { _, _ -> },
+    /** 月份标题菜单：回顾这个月（带上当前标签筛选） */
+    onReviewMonth: (String) -> Unit = {},
     onError: (Throwable) -> Unit = {},
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -199,6 +209,16 @@ fun TimelinePage(
                     Text(stringResource(R.string.timeline_title), Modifier.weight(1f), color = Ink, fontSize = 34.sp, fontWeight = FontWeight.Bold)
                     IconButton(onClick = onSettings) { Icon(Icons.Default.MoreVert, stringResource(R.string.a11y_settings), tint = Quiet) }
                 }
+                // 时光提醒：标题与标签筛选之间；送达卡随页面滚动，不遮挡正文
+                TimeReminderSection(
+                    letters = reminderLetters,
+                    invitation = reviewInvitation,
+                    entries = entries,
+                    onOpenEnvelope = onOpenEnvelope,
+                    onOpenMail = onOpenMail,
+                    onOpenInvitation = onOpenReviewInvitation,
+                    onDismissInvitation = onDismissReviewInvitation,
+                )
                 // 标签筛选：单行横向滚动，首位「全部」= 未筛选，行内只放内置标签，多选仍为叠加（OR）
                 TagFilterRow(
                     tags = chipTags,
@@ -235,15 +255,30 @@ fun TimelinePage(
                             .padding(horizontal = 16.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            displayMonth(month),
-                            Modifier
-                                .weight(1f)
-                                .padding(start = 6.dp),
-                            color = Quiet,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
+                        var monthMenuOpen by remember { mutableStateOf(false) }
+                        Box(Modifier.weight(1f)) {
+                            Text(
+                                displayMonth(month),
+                                Modifier
+                                    .padding(start = 6.dp)
+                                    .clickable { monthMenuOpen = true },
+                                color = Quiet,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            androidx.compose.material3.DropdownMenu(
+                                expanded = monthMenuOpen,
+                                onDismissRequest = { monthMenuOpen = false },
+                            ) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.month_menu_review)) },
+                                    onClick = {
+                                        monthMenuOpen = false
+                                        onReviewMonth(month)
+                                    },
+                                )
+                            }
+                        }
                         // 吸顶：搜索在日历左侧
                         IconButton(
                             onClick = onSearch,
@@ -434,6 +469,72 @@ private fun displayMonth(value: String): String {
     // 只包住解析，stringResource 放在外面（理由见 formatSearchDate）
     val month = runCatching { YearMonth.parse(value) }.getOrNull() ?: return value
     return stringResource(R.string.timetravel_month_full, month.year, month.monthValue)
+}
+
+/**
+ * 首页「时光提醒」区（01 §3）：
+ * 到期未读信的送达卡优先，其下是回顾邀请；都没有时不预留空白。
+ * 送达区不受标签筛选影响，「置顶」只是内容顺序在顶部，不做遮挡正文的悬浮层。
+ */
+@Composable
+private fun TimeReminderSection(
+    letters: List<com.beyondguo.imprints.data.LetterListRow>,
+    invitation: Pair<String, com.beyondguo.imprints.review.DateRange>?,
+    entries: List<EntryEntity>,
+    onOpenEnvelope: (String) -> Unit,
+    onOpenMail: () -> Unit,
+    onOpenInvitation: (String, com.beyondguo.imprints.review.DateRange) -> Unit,
+    onDismissInvitation: (String, com.beyondguo.imprints.review.DateRange) -> Unit,
+) {
+    if (letters.isEmpty() && invitation == null) return
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (letters.isNotEmpty()) {
+            val latest = letters.maxByOrNull { it.deliverAtMs }!!
+            val deliverDate = stringResource(
+                R.string.format_date_md,
+                latest.deliverLocalMinute.substring(5, 7).toInt(),
+                latest.deliverLocalMinute.substring(8, 10).toInt(),
+            )
+            OutlinePanel(Modifier.fillMaxWidth()) {
+                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (letters.size == 1) {
+                        Text(stringResource(R.string.home_letter_from_past), color = Green, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.mail_deliver_on, deliverDate), color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        Button(onClick = { onOpenEnvelope(latest.entryId) }, shape = RoundedCornerShape(12.dp)) {
+                            Text(stringResource(R.string.home_letter_open))
+                        }
+                    } else {
+                        Text(stringResource(R.string.home_letter_multi, letters.size), color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.mail_deliver_on, deliverDate), color = Quiet, fontSize = 12.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = { onOpenEnvelope(latest.entryId) }) { Text(stringResource(R.string.home_letter_open), color = Green) }
+                            TextButton(onClick = onOpenMail) { Text(stringResource(R.string.home_letter_view_all), color = Quiet) }
+                        }
+                    }
+                }
+            }
+        }
+        invitation?.let { (kind, range) ->
+            val count = entries.count { entry ->
+                runCatching { ReviewPeriods.parseDate(entry.eventLocalMinute) }.getOrNull()?.let { range.contains(it) } == true
+            }
+            if (count > 0) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    when (kind) {
+                        ReviewPeriods.YEAR -> stringResource(R.string.home_review_invite_year, count)
+                        ReviewPeriods.WEEK -> stringResource(R.string.home_review_invite_week, count)
+                        else -> stringResource(R.string.home_review_invite_month, count)
+                    },
+                    Modifier.weight(1f).padding(start = 4.dp),
+                    color = Quiet, fontSize = 13.sp,
+                )
+                TextButton(onClick = { onOpenInvitation(kind, range) }) { Text(stringResource(R.string.home_review_invite_action), color = Green) }
+                IconButton(onClick = { onDismissInvitation(kind, range) }, modifier = Modifier.size(32.dp)) {
+                    Text("×", color = Quiet, fontSize = 16.sp)
+                }
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)

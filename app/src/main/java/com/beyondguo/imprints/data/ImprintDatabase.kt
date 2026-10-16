@@ -145,10 +145,15 @@ data class EntryFtsEntity(
 
 @Dao
 interface ImprintDao {
-    @Query("SELECT * FROM entries WHERE deletedAtMs IS NULL ORDER BY eventLocalMinute DESC, createdAtMs DESC, id DESC")
+    // 注意：以下所有面向「普通印迹」的查询都带 `NOT IN (SELECT entryId FROM future_letters)`。
+    // 未来信复用 entries 行存正文，但**不是**普通印迹——不能只在 UI 里过滤。
+    @Query("SELECT * FROM entries WHERE deletedAtMs IS NULL AND id NOT IN (SELECT entryId FROM future_letters) ORDER BY eventLocalMinute DESC, createdAtMs DESC, id DESC")
     fun activeEntries(): Flow<List<EntryEntity>>
 
-    @Query("SELECT * FROM entries WHERE deletedAtMs IS NOT NULL ORDER BY deletedAtMs DESC")
+    @Query("SELECT * FROM entries WHERE deletedAtMs IS NULL AND id NOT IN (SELECT entryId FROM future_letters) ORDER BY eventLocalMinute DESC, createdAtMs DESC, id DESC")
+    suspend fun activeEntriesOnce(): List<EntryEntity>
+
+    @Query("SELECT * FROM entries WHERE deletedAtMs IS NOT NULL AND id NOT IN (SELECT entryId FROM future_letters) ORDER BY deletedAtMs DESC")
     fun recycledEntries(): Flow<List<EntryEntity>>
 
     @Query("SELECT * FROM entries WHERE id = :id LIMIT 1")
@@ -175,11 +180,15 @@ interface ImprintDao {
     @Query("SELECT * FROM entries WHERE deletedAtMs IS NOT NULL AND deletedAtMs <= :cutoff")
     suspend fun expired(cutoff: Long): List<EntryEntity>
 
-    @Query("SELECT * FROM entries WHERE deletedAtMs IS NULL AND id IN (SELECT entryId FROM entry_fts WHERE body MATCH :query) ORDER BY eventLocalMinute DESC, createdAtMs DESC, id DESC")
+    @Query("SELECT * FROM entries WHERE deletedAtMs IS NULL AND id NOT IN (SELECT entryId FROM future_letters) AND id IN (SELECT entryId FROM entry_fts WHERE body MATCH :query) ORDER BY eventLocalMinute DESC, createdAtMs DESC, id DESC")
     suspend fun searchBody(query: String): List<EntryEntity>
 
-    @Query("SELECT * FROM entries WHERE deletedAtMs IS NULL AND instr(body, :text) > 0 ORDER BY eventLocalMinute DESC, createdAtMs DESC, id DESC")
+    @Query("SELECT * FROM entries WHERE deletedAtMs IS NULL AND id NOT IN (SELECT entryId FROM future_letters) AND instr(body, :text) > 0 ORDER BY eventLocalMinute DESC, createdAtMs DESC, id DESC")
     suspend fun searchBodySubstring(text: String): List<EntryEntity>
+
+    /** 回顾候选（RV-02/RV-05）：只取普通、未删除、事件日期（含当日）落在范围内的印迹。 */
+    @Query("SELECT * FROM entries WHERE deletedAtMs IS NULL AND id NOT IN (SELECT entryId FROM future_letters) AND substr(eventLocalMinute, 1, 10) BETWEEN :start AND :end ORDER BY eventLocalMinute ASC, createdAtMs ASC, id ASC")
+    suspend fun candidateEntries(start: String, end: String): List<EntryEntity>
 
     @Query("SELECT * FROM entries")
     suspend fun allEntries(): List<EntryEntity>
@@ -253,12 +262,19 @@ interface ImprintDao {
 }
 
 @Database(
-    entities = [EntryEntity::class, VisualMediaEntity::class, AudioEntity::class, FeelingEntity::class, PlaceEntity::class, SecurityStateEntity::class, EntryFtsEntity::class, TagEntity::class, EntryTagEntity::class],
-    version = 5,
+    entities = [
+        EntryEntity::class, VisualMediaEntity::class, AudioEntity::class, FeelingEntity::class,
+        PlaceEntity::class, SecurityStateEntity::class, EntryFtsEntity::class, TagEntity::class, EntryTagEntity::class,
+        FutureLetterEntity::class, LetterNotificationEventEntity::class,
+        ReviewEntity::class, ReviewSourceEntity::class, ReviewSourceMediaEntity::class,
+        ContentDraftEntity::class, MediaReferenceEntity::class, ReviewInvitationStateEntity::class,
+    ],
+    version = 6,
     exportSchema = true,
 )
 abstract class ImprintDatabase : RoomDatabase() {
     abstract fun dao(): ImprintDao
+    abstract fun mailReviewDao(): MailReviewDao
 
     companion object {
         @Volatile private var instance: ImprintDatabase? = null
@@ -345,6 +361,82 @@ abstract class ImprintDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v5→v6：时光邮箱与回顾。
+         *
+         * 新增信件元数据、通知投递记录、总结/来源快照/快照媒体、草稿、媒体所有权与邀请偏好。
+         * 普通印迹与媒体表原样保留；信件复用 entries 行存正文，靠 future_letters 关联行区分。
+         * DDL 必须与 Room 生成的 `app/schemas/…/6.json` 的 createSql 结构一致。
+         */
+        internal val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `future_letters` (`entryId` TEXT NOT NULL, `title` TEXT NOT NULL, " +
+                        "`deliverAtMs` INTEGER NOT NULL, `deliverLocalMinute` TEXT NOT NULL, `deliverZoneId` TEXT NOT NULL, " +
+                        "`deliveredAtMs` INTEGER, `firstOpenedAtMs` INTEGER, `deliveryReadAtMs` INTEGER, " +
+                        "`notifyEnabled` INTEGER NOT NULL, `scheduleRevision` INTEGER NOT NULL, PRIMARY KEY(`entryId`), " +
+                        "FOREIGN KEY(`entryId`) REFERENCES `entries`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_future_letters_deliverAtMs` ON `future_letters` (`deliverAtMs`)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `letter_notification_events` (`entryId` TEXT NOT NULL, " +
+                        "`scheduleRevision` INTEGER NOT NULL, `notificationId` INTEGER NOT NULL, `attemptState` TEXT NOT NULL, " +
+                        "`lastAttemptAtMs` INTEGER, `postedAtMs` INTEGER, `suppressedReason` TEXT, " +
+                        "PRIMARY KEY(`entryId`, `scheduleRevision`), " +
+                        "FOREIGN KEY(`entryId`) REFERENCES `future_letters`(`entryId`) ON UPDATE NO ACTION ON DELETE CASCADE)",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_letter_notification_events_entryId` ON `letter_notification_events` (`entryId`)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `reviews` (`id` TEXT NOT NULL, `periodKind` TEXT NOT NULL, " +
+                        "`startLocalDate` TEXT NOT NULL, `endLocalDateInclusive` TEXT NOT NULL, `title` TEXT NOT NULL, " +
+                        "`userBody` TEXT NOT NULL, `closingText` TEXT NOT NULL, `coverSourceKey` TEXT, " +
+                        "`selectedTagIds` TEXT NOT NULL, `tagNameSnapshot` TEXT NOT NULL, " +
+                        "`createdAtMs` INTEGER NOT NULL, `updatedAtMs` INTEGER NOT NULL, `deletedAtMs` INTEGER, " +
+                        "`snapshotRevision` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_reviews_deletedAtMs` ON `reviews` (`deletedAtMs`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_reviews_updatedAtMs` ON `reviews` (`updatedAtMs`)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `review_sources` (`reviewId` TEXT NOT NULL, `sourceKind` TEXT NOT NULL, " +
+                        "`sourceId` TEXT NOT NULL, `sourceUpdatedAtMs` INTEGER NOT NULL, `contentHash` TEXT NOT NULL, " +
+                        "`eventDate` TEXT NOT NULL, `included` INTEGER NOT NULL, `featured` INTEGER NOT NULL, " +
+                        "`featuredOrder` INTEGER NOT NULL, `titleSnapshot` TEXT NOT NULL, `bodySnapshot` TEXT NOT NULL, " +
+                        "`tagSnapshot` TEXT NOT NULL, `visibility` TEXT NOT NULL, `createdAtMs` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`reviewId`, `sourceKind`, `sourceId`), " +
+                        "FOREIGN KEY(`reviewId`) REFERENCES `reviews`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_review_sources_reviewId` ON `review_sources` (`reviewId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_review_sources_sourceId` ON `review_sources` (`sourceId`)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `review_source_media` (`id` TEXT NOT NULL, `reviewId` TEXT NOT NULL, " +
+                        "`sourceKind` TEXT NOT NULL, `sourceId` TEXT NOT NULL, `role` TEXT NOT NULL, `ordinal` INTEGER NOT NULL, " +
+                        "`relativePath` TEXT NOT NULL, `kind` TEXT NOT NULL, `mime` TEXT NOT NULL, `byteLength` INTEGER NOT NULL, " +
+                        "`sha256` TEXT NOT NULL, PRIMARY KEY(`id`), " +
+                        "FOREIGN KEY(`reviewId`, `sourceKind`, `sourceId`) REFERENCES `review_sources`(`reviewId`, `sourceKind`, `sourceId`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE)",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_review_source_media_reviewId` ON `review_source_media` (`reviewId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_review_source_media_reviewId_sourceKind_sourceId` ON `review_source_media` (`reviewId`, `sourceKind`, `sourceId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_review_source_media_relativePath` ON `review_source_media` (`relativePath`)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `content_drafts` (`id` TEXT NOT NULL, `type` TEXT NOT NULL, " +
+                        "`targetId` TEXT, `payload` TEXT NOT NULL, `updatedAtMs` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_content_drafts_type` ON `content_drafts` (`type`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_content_drafts_updatedAtMs` ON `content_drafts` (`updatedAtMs`)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `media_references` (`ownerKind` TEXT NOT NULL, `ownerId` TEXT NOT NULL, " +
+                        "`relativePath` TEXT NOT NULL, PRIMARY KEY(`ownerKind`, `ownerId`, `relativePath`))",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_media_references_relativePath` ON `media_references` (`relativePath`)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `review_invitation_state` (`periodKind` TEXT NOT NULL, " +
+                        "`startLocalDate` TEXT NOT NULL, `endLocalDateInclusive` TEXT NOT NULL, `closedAtMs` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`periodKind`, `startLocalDate`, `endLocalDateInclusive`))",
+                )
+            }
+        }
+
         /** 预置标签落库：迁移和「全新安装建库」两条路径都必须走，否则新装用户拿不到标签。 */
         private fun insertPresetTags(db: SupportSQLiteDatabase) {
             TagCatalog.seed.forEach { tag ->
@@ -365,7 +457,7 @@ abstract class ImprintDatabase : RoomDatabase() {
 
         fun get(context: Context): ImprintDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, ImprintDatabase::class.java, "imprints.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .addCallback(SEED_TAGS_ON_CREATE)
                 .build().also { instance = it }
         }

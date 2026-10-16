@@ -5,13 +5,22 @@ import android.net.Uri
 import android.os.StatFs
 import androidx.room.withTransaction
 import com.beyondguo.imprints.data.AudioEntity
+import com.beyondguo.imprints.data.ContentDraftEntity
 import com.beyondguo.imprints.data.EntryEntity
 import com.beyondguo.imprints.data.EntryFtsEntity
 import com.beyondguo.imprints.data.EntryRules
 import com.beyondguo.imprints.data.EntryTagEntity
+import com.beyondguo.imprints.data.FutureLetterEntity
 import com.beyondguo.imprints.data.ImprintDatabase
 import com.beyondguo.imprints.data.ImprintRepository
+import com.beyondguo.imprints.data.MediaReferenceEntity
 import com.beyondguo.imprints.data.PlaceEntity
+import com.beyondguo.imprints.data.ReviewEntity
+import com.beyondguo.imprints.data.ReviewInvitationStateEntity
+import com.beyondguo.imprints.data.ReviewSourceEntity
+import com.beyondguo.imprints.data.ReviewSourceMediaEntity
+import com.beyondguo.imprints.data.SourceKind
+import com.beyondguo.imprints.data.SourceVisibility
 import com.beyondguo.imprints.data.TagCatalog
 import com.beyondguo.imprints.data.TagEntity
 import com.beyondguo.imprints.data.TagRules
@@ -39,7 +48,9 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 data class BackupPreview(val uuid: String, val hash: String, val entries: Int, val attachments: Int,
-    val attachmentBytes: Long, val duplicates: Int, val expired: Int, val feelingMode: String)
+    val attachmentBytes: Long, val duplicates: Int, val expired: Int, val feelingMode: String,
+    /** 新对象类型（格式 v2）；旧备份缺这些集合时为 0 */
+    val letters: Int = 0, val reviews: Int = 0, val drafts: Int = 0)
 
 private data class FileSource(val id: String, val file: File, val sha: String)
 private data class TempFile(val file: File, val key: ByteArray)
@@ -47,6 +58,7 @@ private data class ParsedBackup(val uuid: String, val hash: String, val metadata
 
 class BackupService(private val context: Context, private val database: ImprintDatabase, private val repository: ImprintRepository) {
     private val dao = database.dao()
+    private val mailDao = database.mailReviewDao()
     private val security = repository.security
     private val random = SecureRandom()
 
@@ -71,17 +83,36 @@ class BackupService(private val context: Context, private val database: ImprintD
             val feelings = entries.mapNotNull { entry ->
                 dao.feeling(entry.id)?.let { entry.id to (security.decodeFeeling(it) ?: "") }
             }.toMap()
-            // 主图 + 可选动态照片附属视频
-            val sources = visuals.flatMap { v ->
-                val main = FileSource(v.id, repository.files.resolve(v.relativePath), v.sha256)
-                val motion = v.motionVideoPath?.let { path ->
-                    val sha = v.motionVideoSha256
-                        ?: error("动态照片附属视频缺少校验值：${v.id}")
-                    FileSource(path, repository.files.resolve(path), sha)
-                }
-                listOfNotNull(main, motion)
-            } + audio.map { FileSource(it.id, repository.files.resolve(it.relativePath), it.sha256) }
+            // ---- 新对象类型（格式 v2）：信件 / 总结 / 快照 / 草稿 / 邀请偏好 ----
+            val letters = mailDao.allLetters().filter { it.entryId in ids }
+            val reviews = mailDao.allReviews().filter { it.deletedAtMs == null || it.deletedAtMs > cutoff }
+            val reviewIds = reviews.map { it.id }.toSet()
+            val reviewSources = mailDao.allSources().filter { it.reviewId in reviewIds }
+            val reviewMedia = mailDao.allSourceMedia().filter { it.reviewId in reviewIds }
+            val drafts = mailDao.allDrafts()
+            val invitations = mailDao.invitationStates()
+            // 草稿附件：路径与校验值从草稿 payload 里的附件记录取（与 media_references 一致）
+            val draftFilePaths = LinkedHashMap<String, String>()
+            drafts.forEach { draft -> draftFiles(draft.payload).forEach { file -> draftFilePaths.putIfAbsent(file.path, file.sha) } }
+
+            // ---- 附件清单：主图 / 动态附属视频 / 音频 / 快照与草稿引用的文件，同名文件只打包一次 ----
+            val fileSources = LinkedHashMap<String, FileSource>()
+            fun addSource(path: String, sha: String) {
+                if (path in fileSources) return
+                fileSources[path] = FileSource(path, repository.files.resolve(path), sha)
+            }
+            visuals.forEach { v ->
+                addSource(v.relativePath, v.sha256)
+                val motion = v.motionVideoPath
+                if (motion != null) addSource(motion, v.motionVideoSha256 ?: error("动态照片附属视频缺少校验值：${v.id}"))
+            }
+            audio.forEach { addSource(it.relativePath, it.sha256) }
+            reviewMedia.forEach { addSource(it.relativePath, it.sha256) }
+            draftFilePaths.forEach { (path, sha) -> addSource(path, sha) }
+            val sources = fileSources.values.toList()
+
             val metadata = JSONObject()
+                .put("formatVersion", 2)
                 .put("feelingMode", security.state().feelingMode)
                 .put("entries", JSONArray().apply { entries.forEach { put(entryJson(it)) } })
                 .put("visuals", JSONArray().apply { visuals.forEach { put(visualJson(it)) } })
@@ -90,6 +121,12 @@ class BackupService(private val context: Context, private val database: ImprintD
                 .put("tags", JSONArray().apply { tags.forEach { put(tagJson(it)) } })
                 .put("entryTags", JSONArray().apply { entryTags.forEach { put(entryTagJson(it)) } })
                 .put("feelings", JSONObject().apply { feelings.forEach { (id, text) -> put(id, text) } })
+                .put("letters", JSONArray().apply { letters.forEach { put(letterJson(it)) } })
+                .put("reviews", JSONArray().apply { reviews.forEach { put(reviewJson(it)) } })
+                .put("reviewSources", JSONArray().apply { reviewSources.forEach { put(reviewSourceJson(it)) } })
+                .put("reviewSourceMedia", JSONArray().apply { reviewMedia.forEach { put(reviewSourceMediaJson(it)) } })
+                .put("drafts", JSONArray().apply { drafts.forEach { put(draftJson(it)) } })
+                .put("reviewInvitations", JSONArray().apply { invitations.forEach { put(invitationJson(it)) } })
             val bytes = metadata.toString().toByteArray(Charsets.UTF_8)
             context.contentResolver.openOutputStream(uri, "w")?.use { raw ->
                 val output = DataOutputStream(BufferedOutputStream(raw))
@@ -120,6 +157,10 @@ class BackupService(private val context: Context, private val database: ImprintD
         val entries = parsed.metadata.getJSONArray("entries")
         val visuals = parsed.metadata.getJSONArray("visuals")
         val audio = parsed.metadata.getJSONArray("audio")
+        val letters = parsed.metadata.optJSONArray("letters")
+        val reviews = parsed.metadata.optJSONArray("reviews")
+        val drafts = parsed.metadata.optJSONArray("drafts")
+        val reviewMedia = parsed.metadata.optJSONArray("reviewSourceMedia")
         var duplicates = 0
         var expired = 0
         val included = mutableSetOf<String>()
@@ -147,9 +188,28 @@ class BackupService(private val context: Context, private val database: ImprintD
             val item = audio.getJSONObject(i)
             if (item.getString("entryId") in included) attachmentBytes = Math.addExact(attachmentBytes, item.getLong("byteLength"))
         }
+        // 快照与草稿引用的文件也占空间（按保守口径全量计入）
+        if (reviewMedia != null) {
+            for (i in 0 until reviewMedia.length()) {
+                attachmentBytes = Math.addExact(attachmentBytes, reviewMedia.getJSONObject(i).getLong("byteLength"))
+            }
+        }
+        if (drafts != null) {
+            for (i in 0 until drafts.length()) {
+                draftFiles(drafts.getJSONObject(i).optString("payload"))
+                    .forEach { file -> attachmentBytes = Math.addExact(attachmentBytes, file.byteLength) }
+            }
+        }
         require(attachmentBytes >= 0) { "附件长度无效" }
-        BackupPreview(parsed.uuid, parsed.hash, entries.length(), parsed.attachments, attachmentBytes,
-            duplicates, expired, parsed.metadata.getString("feelingMode"))
+        // 三类对象分别报告：不能把信件/总结都算成普通印迹
+        val letterEntryIds = mutableSetOf<String>()
+        if (letters != null) {
+            for (i in 0 until letters.length()) letterEntryIds += letters.getJSONObject(i).getString("entryId")
+        }
+        val ordinaryEntries = (0 until entries.length()).count { entries.getJSONObject(it).getString("id") !in letterEntryIds }
+        BackupPreview(parsed.uuid, parsed.hash, ordinaryEntries, parsed.attachments, attachmentBytes,
+            duplicates, expired, parsed.metadata.getString("feelingMode"),
+            letters = letterEntryIds.size, reviews = reviews?.length() ?: 0, drafts = drafts?.length() ?: 0)
     }
 
     suspend fun import(uri: Uri, password: CharArray, expected: BackupPreview, allowPlaintextConversion: Boolean): Int = repository.exclusive {
@@ -254,13 +314,89 @@ class BackupService(private val context: Context, private val database: ImprintD
                     val id = raw.getString("id")
                     if (feelingsJson.has(id)) security.encodeFeeling(id, feelingsJson.getString(id)) else null
                 }
+                // ---- 信件 / 总结 / 快照 / 草稿 / 邀请（格式 v2；旧备份缺集合按空处理） ----
+                val lettersJson = parsed.metadata.optJSONArray("letters")
+                val reviewsJson = parsed.metadata.optJSONArray("reviews")
+                val reviewSourcesJson = parsed.metadata.optJSONArray("reviewSources")
+                val reviewMediaJson = parsed.metadata.optJSONArray("reviewSourceMedia")
+                val draftsJson = parsed.metadata.optJSONArray("drafts")
+                val invitationsJson = parsed.metadata.optJSONArray("reviewInvitations")
+
+                val backupLetters = mutableMapOf<String, FutureLetterEntity>()
+                if (lettersJson != null) {
+                    for (i in 0 until lettersJson.length()) {
+                        val letter = letterFromJson(lettersJson.getJSONObject(i))
+                        backupLetters[letter.entryId] = letter
+                    }
+                }
+                // 信件行只随本次成功导入的 entries 落库；重复 ID 不覆盖本机信件状态
+                val letters = backupLetters.values.filter { it.entryId in included && dao.entry(it.entryId) == null }
+
+                val reviews = mutableListOf<ReviewEntity>()
+                val reviewSourceRows = mutableListOf<ReviewSourceEntity>()
+                val reviewMediaRows = mutableListOf<ReviewSourceMediaEntity>()
+                if (reviewsJson != null) {
+                    for (i in 0 until reviewsJson.length()) {
+                        val review = reviewFromJson(reviewsJson.getJSONObject(i))
+                        if (mailDao.review(review.id) != null) continue
+                        val deleted = review.deletedAtMs
+                        if (deleted != null && deleted <= cutoff) continue
+                        reviews += review
+                    }
+                }
+                val importableReviewIds = reviews.map { it.id }.toSet()
+                if (reviewSourcesJson != null) {
+                    for (i in 0 until reviewSourcesJson.length()) {
+                        val source = reviewSourceFromJson(reviewSourcesJson.getJSONObject(i))
+                        if (source.reviewId !in importableReviewIds) continue
+                        val restorable = sourceRestorable(source.sourceKind, source.sourceId, included, backupLetters)
+                        reviewSourceRows += if (restorable) {
+                            source
+                        } else {
+                            // 缺失/已删/未读来源：保留无内容占位，不恢复敏感快照
+                            source.copy(
+                                visibility = if (dao.entry(source.sourceId)?.deletedAtMs != null) SourceVisibility.RECYCLED.name else SourceVisibility.PURGED.name,
+                                titleSnapshot = "", bodySnapshot = "", tagSnapshot = "", contentHash = "",
+                            )
+                        }
+                    }
+                }
+                if (reviewMediaJson != null) {
+                    for (i in 0 until reviewMediaJson.length()) {
+                        val media = reviewSourceMediaFromJson(reviewMediaJson.getJSONObject(i))
+                        if (media.reviewId !in importableReviewIds) continue
+                        if (!sourceRestorable(media.sourceKind, media.sourceId, included, backupLetters)) continue
+                        val path = install(media.relativePath)
+                        reviewMediaRows += media.copy(relativePath = path)
+                    }
+                }
+                val draftRows = mutableListOf<ContentDraftEntity>()
+                if (draftsJson != null) {
+                    for (i in 0 until draftsJson.length()) {
+                        val draft = draftFromJson(draftsJson.getJSONObject(i))
+                        if (mailDao.draft(draft.id) != null) continue
+                        // 先落盘草稿附件，再把 payload 里的旧路径重写成新文件 id
+                        draftFiles(draft.payload).forEach { file -> install(file.path) }
+                        draftRows += draft.copy(payload = remapDraftPayload(draft.payload, fileMap))
+                    }
+                }
+                val invitationRows = mutableListOf<ReviewInvitationStateEntity>()
+                if (invitationsJson != null) {
+                    for (i in 0 until invitationsJson.length()) {
+                        invitationRows += invitationFromJson(invitationsJson.getJSONObject(i))
+                    }
+                }
+                val importedLetterIds = letters.map { it.entryId }.toSet()
                 database.withTransaction {
                     placeMap.values.forEach { dao.upsertPlace(it) }
                     entries.forEach { raw ->
                         val entry = entryFromJson(raw)
                         val placeId = entry.placeId?.let { placeMap[it]?.id }
                         dao.upsertEntry(entry.copy(placeId = placeId))
-                        if (entry.body.isNotBlank()) dao.insertFts(EntryFtsEntity(entryId = entry.id, body = entry.body))
+                        // 信件不进正文 FTS：搜索只查普通印迹
+                        if (entry.body.isNotBlank() && entry.id !in importedLetterIds) {
+                            dao.insertFts(EntryFtsEntity(entryId = entry.id, body = entry.body))
+                        }
                     }
                     if (visuals.isNotEmpty()) dao.insertVisuals(visuals)
                     audio.forEach { dao.upsertAudio(it) }
@@ -268,6 +404,31 @@ class BackupService(private val context: Context, private val database: ImprintD
                     // IGNORE：导出的标签行不得覆盖本机既有预置标签
                     if (tags.isNotEmpty()) dao.insertTags(tags)
                     if (entryTags.isNotEmpty()) dao.insertEntryTags(entryTags)
+                    // 信件 / 总结 / 快照 / 草稿 / 邀请
+                    letters.forEach { mailDao.upsertLetter(it) }
+                    reviews.forEach { mailDao.upsertReview(it) }
+                    if (reviewSourceRows.isNotEmpty()) mailDao.insertSources(reviewSourceRows)
+                    if (reviewMediaRows.isNotEmpty()) mailDao.insertSourceMedia(reviewMediaRows)
+                    draftRows.forEach { mailDao.upsertDraft(it) }
+                    invitationRows.forEach { mailDao.upsertInvitationState(it) }
+                    // 媒体所有权重建：普通印迹/信件、总结快照、草稿（替换附件时据此保护共享文件）
+                    included.forEach { entryId ->
+                        val paths = (visuals.filter { it.entryId == entryId }.flatMap { listOfNotNull(it.relativePath, it.motionVideoPath) } +
+                            audio.filter { it.entryId == entryId }.map { it.relativePath }).toSet()
+                        if (paths.isNotEmpty()) {
+                            val ownerKind = if (entryId in importedLetterIds) "LETTER" else "ENTRY"
+                            mailDao.insertMediaRefs(paths.map { MediaReferenceEntity(ownerKind, entryId, it) })
+                        }
+                    }
+                    reviewMediaRows.groupBy { it.reviewId }.forEach { (reviewId, rows) ->
+                        mailDao.insertMediaRefs(rows.map { MediaReferenceEntity("REVIEW", reviewId, it.relativePath) })
+                    }
+                    draftRows.forEach { draft ->
+                        val paths = draftFiles(draft.payload).map { it.path }
+                        if (paths.isNotEmpty()) {
+                            mailDao.insertMediaRefs(paths.map { MediaReferenceEntity("DRAFT", draft.id, it) })
+                        }
+                    }
                 }
                 entries.size
             } catch (error: Exception) {
@@ -293,10 +454,18 @@ class BackupService(private val context: Context, private val database: ImprintD
                     val expectedIds = mutableMapOf<String, Pair<String, Long>>()
                     val visuals = metadata.getJSONArray("visuals")
                     val audio = metadata.getJSONArray("audio")
-                    val retainedEntryIds = if (keepFiles) {
+                    // 同一个文件可能同时被 entries 与快照/草稿引用：清单按文件去重，重复项校验一致即可
+                    fun expect(id: String, sha: String, length: Long) {
+                        val previous = expectedIds.putIfAbsent(id, sha to length)
+                        check(previous == null || previous == (sha to length)) { "附件清单不一致" }
+                    }
+                    val cutoff = EntryRules.recycleCutoff(System.currentTimeMillis())
+                    val retainedEntryIds: Set<String>
+                    val retainedReviewIds: Set<String>
+                    val retainedDraftIds: Set<String>
+                    if (keepFiles) {
                         val entries = metadata.getJSONArray("entries")
-                        val cutoff = EntryRules.recycleCutoff(System.currentTimeMillis())
-                        buildSet {
+                        retainedEntryIds = buildSet {
                             for (i in 0 until entries.length()) {
                                 val entry = entries.getJSONObject(i)
                                 val id = entry.getString("id")
@@ -304,25 +473,77 @@ class BackupService(private val context: Context, private val database: ImprintD
                                 if (dao.entry(id) == null && (deleted == 0L || deleted > cutoff)) add(id)
                             }
                         }
-                    } else emptySet()
+                        val reviews = metadata.optJSONArray("reviews")
+                        retainedReviewIds = buildSet {
+                            if (reviews != null) for (i in 0 until reviews.length()) {
+                                val review = reviews.getJSONObject(i)
+                                val id = review.getString("id")
+                                val deleted = review.optLong("deletedAtMs", 0)
+                                if (mailDao.review(id) == null && (deleted == 0L || deleted > cutoff)) add(id)
+                            }
+                        }
+                        val drafts = metadata.optJSONArray("drafts")
+                        retainedDraftIds = buildSet {
+                            if (drafts != null) for (i in 0 until drafts.length()) {
+                                val id = drafts.getJSONObject(i).getString("id")
+                                if (mailDao.draft(id) == null) add(id)
+                            }
+                        }
+                    } else {
+                        retainedEntryIds = emptySet()
+                        retainedReviewIds = emptySet()
+                        retainedDraftIds = emptySet()
+                    }
+                    // 备份里的信件集合：用于判断快照来源是否可恢复内容
+                    val backupLetters = mutableMapOf<String, FutureLetterEntity>()
+                    metadata.optJSONArray("letters")?.let { letters ->
+                        for (i in 0 until letters.length()) {
+                            val letter = letterFromJson(letters.getJSONObject(i))
+                            backupLetters[letter.entryId] = letter
+                        }
+                    }
                     val retainedFileIds = mutableSetOf<String>()
                     for (i in 0 until visuals.length()) {
                         val item = visuals.getJSONObject(i)
-                        check(expectedIds.put(item.getString("id"), item.getString("sha256") to item.getLong("byteLength")) == null) { "附件 ID 重复" }
+                        expect(item.getString("id"), item.getString("sha256"), item.getLong("byteLength"))
                         if (item.getString("entryId") in retainedEntryIds) retainedFileIds += item.getString("id")
                         val motionId = item.optString("motionVideoPath").takeIf { it.isNotEmpty() }
                         if (motionId != null) {
                             val motionSha = item.optString("motionVideoSha256")
                             val motionLen = item.optLong("motionVideoByteLength", 0)
                             check(motionSha.isNotEmpty() && motionLen > 0) { "动态照片附属视频元数据无效" }
-                            check(expectedIds.put(motionId, motionSha to motionLen) == null) { "附件 ID 重复" }
+                            expect(motionId, motionSha, motionLen)
                             if (item.getString("entryId") in retainedEntryIds) retainedFileIds += motionId
                         }
                     }
                     for (i in 0 until audio.length()) {
                         val item = audio.getJSONObject(i)
-                        check(expectedIds.put(item.getString("id"), item.getString("sha256") to item.getLong("byteLength")) == null) { "附件 ID 重复" }
+                        expect(item.getString("id"), item.getString("sha256"), item.getLong("byteLength"))
                         if (item.getString("entryId") in retainedEntryIds) retainedFileIds += item.getString("id")
+                    }
+                    // 快照媒体：只有来源仍可见（未删、信件已读）的快照才恢复文件
+                    metadata.optJSONArray("reviewSourceMedia")?.let { media ->
+                        for (i in 0 until media.length()) {
+                            val item = media.getJSONObject(i)
+                            val path = item.getString("relativePath")
+                            expect(path, item.optString("sha256"), item.getLong("byteLength"))
+                            if (item.getString("reviewId") in retainedReviewIds &&
+                                sourceRestorable(item.getString("sourceKind"), item.getString("sourceId"), retainedEntryIds, backupLetters)
+                            ) {
+                                retainedFileIds += path
+                            }
+                        }
+                    }
+                    // 草稿附件
+                    metadata.optJSONArray("drafts")?.let { drafts ->
+                        for (i in 0 until drafts.length()) {
+                            val draft = drafts.getJSONObject(i)
+                            val keep = draft.getString("id") in retainedDraftIds
+                            draftFiles(draft.optString("payload")).forEach { file ->
+                                expect(file.path, file.sha, file.byteLength)
+                                if (keep) retainedFileIds += file.path
+                            }
+                        }
                     }
                     val count = data.readInt()
                     require(count == expectedIds.size && count in 0..1_000_000) { "附件清单不一致" }
@@ -443,6 +664,181 @@ class BackupService(private val context: Context, private val database: ImprintD
         return normalized.substring(0, end)
     }
     private fun entryTagJson(e: EntryTagEntity) = JSONObject().put("entryId", e.entryId).put("tagId", e.tagId)
+
+    // ---------- 格式 v2：信件 / 总结 / 快照 / 草稿 / 邀请 ----------
+
+    private data class DraftFile(val path: String, val sha: String, val byteLength: Long)
+
+    /**
+     * 快照内容是否可恢复（SYS-04 / RV-06）：
+     * 来源必须存在且可见（未删）；信件还必须**到期且已确认阅读**。
+     * 不能借导入的快照把本机已删除或未读信的内容重新显示出来。
+     */
+    private suspend fun sourceRestorable(
+        sourceKind: String,
+        sourceId: String,
+        importedEntryIds: Set<String>,
+        backupLetters: Map<String, FutureLetterEntity>,
+    ): Boolean = when (sourceKind) {
+        SourceKind.LETTER.name -> {
+            val letter = backupLetters[sourceId]?.takeIf { it.entryId in importedEntryIds } ?: mailDao.letter(sourceId)
+            letter != null && letter.deliveryReadAtMs != null &&
+                (letter.deliveredAtMs != null || System.currentTimeMillis() >= letter.deliverAtMs)
+        }
+        else -> {
+            val entry = dao.entry(sourceId)
+            sourceId in importedEntryIds || (entry != null && entry.deletedAtMs == null)
+        }
+    }
+
+    /** 草稿 payload 引用的附件（信件草稿的图片/视频/音频；回顾草稿无附件）。 */    private fun draftFiles(payloadJson: String): List<DraftFile> {
+        if (payloadJson.isBlank()) return emptyList()
+        val payload = runCatching { JSONObject(payloadJson) }.getOrNull() ?: return emptyList()
+        val result = mutableListOf<DraftFile>()
+        payload.optJSONArray("visuals")?.let { array ->
+            (0 until array.length()).forEach { index ->
+                val item = array.getJSONObject(index)
+                item.optString("path").takeIf { it.isNotBlank() }?.let { path ->
+                    result += DraftFile(path, item.optString("sha256"), item.optLong("byteLength"))
+                }
+                item.optString("motionPath").takeIf { it.isNotBlank() }?.let { motion ->
+                    result += DraftFile(motion, item.optString("motionSha256"), item.optLong("motionByteLength"))
+                }
+            }
+        }
+        (payload.opt("audio") as? JSONObject)?.let { item ->
+            item.optString("path").takeIf { it.isNotBlank() }?.let { path ->
+                result += DraftFile(path, item.optString("sha256"), item.optLong("byteLength"))
+            }
+        }
+        return result
+    }
+
+    /** 草稿 payload 里的旧文件路径 → 新文件 id（导入时保持引用关系）。 */
+    private fun remapDraftPayload(payloadJson: String, fileMap: Map<String, String>): String {
+        if (payloadJson.isBlank()) return payloadJson
+        val payload = runCatching { JSONObject(payloadJson) }.getOrNull() ?: return payloadJson
+        fun remap(item: JSONObject) {
+            item.optString("path").takeIf { it.isNotBlank() }?.let { item.put("path", fileMap[it] ?: it) }
+            item.optString("motionPath").takeIf { it.isNotBlank() }?.let { item.put("motionPath", fileMap[it] ?: it) }
+        }
+        payload.optJSONArray("visuals")?.let { array -> (0 until array.length()).forEach { remap(array.getJSONObject(it)) } }
+        (payload.opt("audio") as? JSONObject)?.let(::remap)
+        return payload.toString()
+    }
+
+    private fun letterJson(l: FutureLetterEntity) = JSONObject()
+        .put("entryId", l.entryId).put("title", l.title)
+        .put("deliverAtMs", l.deliverAtMs).put("deliverLocalMinute", l.deliverLocalMinute).put("deliverZoneId", l.deliverZoneId)
+        .put("deliveredAtMs", l.deliveredAtMs ?: 0).put("firstOpenedAtMs", l.firstOpenedAtMs ?: 0)
+        .put("deliveryReadAtMs", l.deliveryReadAtMs ?: 0)
+        .put("notifyEnabled", l.notifyEnabled).put("scheduleRevision", l.scheduleRevision)
+
+    private fun letterFromJson(j: JSONObject) = FutureLetterEntity(
+        entryId = j.getString("entryId"),
+        title = j.optString("title"),
+        deliverAtMs = j.getLong("deliverAtMs"),
+        deliverLocalMinute = j.getString("deliverLocalMinute"),
+        deliverZoneId = j.getString("deliverZoneId"),
+        deliveredAtMs = j.optLong("deliveredAtMs").takeIf { it != 0L },
+        firstOpenedAtMs = j.optLong("firstOpenedAtMs").takeIf { it != 0L },
+        deliveryReadAtMs = j.optLong("deliveryReadAtMs").takeIf { it != 0L },
+        notifyEnabled = j.optBoolean("notifyEnabled", true),
+        scheduleRevision = j.optInt("scheduleRevision", 1),
+    )
+
+    private fun reviewJson(r: ReviewEntity) = JSONObject()
+        .put("id", r.id).put("periodKind", r.periodKind)
+        .put("startLocalDate", r.startLocalDate).put("endLocalDateInclusive", r.endLocalDateInclusive)
+        .put("title", r.title).put("userBody", r.userBody).put("closingText", r.closingText)
+        .put("coverSourceKey", r.coverSourceKey ?: "")
+        .put("selectedTagIds", r.selectedTagIds).put("tagNameSnapshot", r.tagNameSnapshot)
+        .put("createdAtMs", r.createdAtMs).put("updatedAtMs", r.updatedAtMs)
+        .put("deletedAtMs", r.deletedAtMs ?: 0).put("snapshotRevision", r.snapshotRevision)
+
+    private fun reviewFromJson(j: JSONObject) = ReviewEntity(
+        id = j.getString("id"),
+        periodKind = j.getString("periodKind"),
+        startLocalDate = j.getString("startLocalDate"),
+        endLocalDateInclusive = j.getString("endLocalDateInclusive"),
+        title = j.optString("title"),
+        userBody = j.optString("userBody"),
+        closingText = j.optString("closingText"),
+        coverSourceKey = j.optString("coverSourceKey").takeIf { it.isNotBlank() },
+        selectedTagIds = j.optString("selectedTagIds"),
+        tagNameSnapshot = j.optString("tagNameSnapshot"),
+        createdAtMs = j.getLong("createdAtMs"),
+        updatedAtMs = j.getLong("updatedAtMs"),
+        deletedAtMs = j.optLong("deletedAtMs").takeIf { it != 0L },
+        snapshotRevision = j.optInt("snapshotRevision", 1),
+    )
+
+    private fun reviewSourceJson(s: ReviewSourceEntity) = JSONObject()
+        .put("reviewId", s.reviewId).put("sourceKind", s.sourceKind).put("sourceId", s.sourceId)
+        .put("sourceUpdatedAtMs", s.sourceUpdatedAtMs).put("contentHash", s.contentHash)
+        .put("eventDate", s.eventDate).put("included", s.included).put("featured", s.featured)
+        .put("featuredOrder", s.featuredOrder).put("titleSnapshot", s.titleSnapshot)
+        .put("bodySnapshot", s.bodySnapshot).put("tagSnapshot", s.tagSnapshot)
+        .put("visibility", s.visibility).put("createdAtMs", s.createdAtMs)
+
+    private fun reviewSourceFromJson(j: JSONObject) = ReviewSourceEntity(
+        reviewId = j.getString("reviewId"),
+        sourceKind = j.getString("sourceKind"),
+        sourceId = j.getString("sourceId"),
+        sourceUpdatedAtMs = j.optLong("sourceUpdatedAtMs"),
+        contentHash = j.optString("contentHash"),
+        eventDate = j.getString("eventDate"),
+        included = j.optBoolean("included", true),
+        featured = j.optBoolean("featured", false),
+        featuredOrder = j.optInt("featuredOrder", 0),
+        titleSnapshot = j.optString("titleSnapshot"),
+        bodySnapshot = j.optString("bodySnapshot"),
+        tagSnapshot = j.optString("tagSnapshot"),
+        visibility = j.optString("visibility").ifBlank { "VISIBLE" },
+        createdAtMs = j.optLong("createdAtMs"),
+    )
+
+    private fun reviewSourceMediaJson(m: ReviewSourceMediaEntity) = JSONObject()
+        .put("id", m.id).put("reviewId", m.reviewId).put("sourceKind", m.sourceKind).put("sourceId", m.sourceId)
+        .put("role", m.role).put("ordinal", m.ordinal).put("relativePath", m.relativePath)
+        .put("kind", m.kind).put("mime", m.mime).put("byteLength", m.byteLength).put("sha256", m.sha256)
+
+    private fun reviewSourceMediaFromJson(j: JSONObject) = ReviewSourceMediaEntity(
+        id = j.getString("id"),
+        reviewId = j.getString("reviewId"),
+        sourceKind = j.getString("sourceKind"),
+        sourceId = j.getString("sourceId"),
+        role = j.getString("role"),
+        ordinal = j.optInt("ordinal"),
+        relativePath = j.getString("relativePath"),
+        kind = j.getString("kind"),
+        mime = j.optString("mime"),
+        byteLength = j.optLong("byteLength"),
+        sha256 = j.optString("sha256"),
+    )
+
+    private fun draftJson(d: ContentDraftEntity) = JSONObject()
+        .put("id", d.id).put("type", d.type).put("targetId", d.targetId ?: "")
+        .put("payload", d.payload).put("updatedAtMs", d.updatedAtMs)
+
+    private fun draftFromJson(j: JSONObject) = ContentDraftEntity(
+        id = j.getString("id"),
+        type = j.getString("type"),
+        targetId = j.optString("targetId").takeIf { it.isNotBlank() },
+        payload = j.optString("payload"),
+        updatedAtMs = j.optLong("updatedAtMs"),
+    )
+
+    private fun invitationJson(i: ReviewInvitationStateEntity) = JSONObject()
+        .put("periodKind", i.periodKind).put("startLocalDate", i.startLocalDate)
+        .put("endLocalDateInclusive", i.endLocalDateInclusive).put("closedAtMs", i.closedAtMs)
+
+    private fun invitationFromJson(j: JSONObject) = ReviewInvitationStateEntity(
+        periodKind = j.getString("periodKind"),
+        startLocalDate = j.getString("startLocalDate"),
+        endLocalDateInclusive = j.getString("endLocalDateInclusive"),
+        closedAtMs = j.optLong("closedAtMs"),
+    )
 
     companion object {
         private val DISCARD = object : OutputStream() { override fun write(b: Int) = Unit }

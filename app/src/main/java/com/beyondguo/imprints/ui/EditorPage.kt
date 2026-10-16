@@ -605,10 +605,14 @@ private fun AudioSourceSheet(
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun EventTimePickerSheet(
+internal fun EventTimePickerSheet(
     initial: LocalDateTime,
     onConfirm: (LocalDateTime) -> Unit,
     onDismiss: () -> Unit,
+    /** 标题/副标题可替换：写信的送达时间选择复用本弹层 */
+    title: String? = null,
+    subtitle: String? = null,
+    showBackToToday: Boolean = true,
 ) {
     var date by remember(initial) { mutableStateOf(initial.toLocalDate()) }
     var hour by remember(initial) { mutableStateOf(initial.hour) }
@@ -626,8 +630,8 @@ private fun EventTimePickerSheet(
             Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Text(stringResource(R.string.editor_pick_date), color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            Text(stringResource(R.string.editor_pick_date_sub), color = Quiet, fontSize = 13.sp)
+            Text(title ?: stringResource(R.string.editor_pick_date), color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(subtitle ?: stringResource(R.string.editor_pick_date_sub), color = Quiet, fontSize = 13.sp)
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = {
@@ -719,7 +723,7 @@ private fun EventTimePickerSheet(
                 modifier = Modifier.fillMaxWidth())
 
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = {
+                if (showBackToToday) TextButton(onClick = {
                     val now = LocalDateTime.now()
                     date = now.toLocalDate(); hour = now.hour; minute = now.minute
                     viewYear = now.year; viewMonth = now.monthValue
@@ -834,7 +838,7 @@ private fun WheelPicker(
 
 /** 媒体库文件名常为 UUID，展示时换成友好文案。@Composable 以便读取本地化文案。 */
 @Composable
-private fun friendlyAudioName(raw: String): String =
+internal fun friendlyAudioName(raw: String): String =
     if (raw.matches(Regex("[0-9a-fA-F-]{36}"))) stringResource(R.string.audio_default_name) else raw
 
 internal enum class EditorMetaTrailing { Chevron, Clear, Expand, ClearThenChevron }
@@ -930,7 +934,7 @@ internal fun EditorMetaRow(
  * 左 ♪ 播放/暂停 · 中标题/副标题点按更换 · 右 × 移除。
  */
 @Composable
-private fun EditorAudioSelectedRow(
+internal fun EditorAudioSelectedRow(
     file: java.io.File,
     displayName: String,
     onRemove: () -> Unit,
@@ -1008,7 +1012,7 @@ private fun EditorAudioSelectedRow(
  * 长按拖动可调整顺序，角标 × 删除。
  */
 @Composable
-private fun EditorMediaGrid(
+internal fun EditorMediaGrid(
     visuals: androidx.compose.runtime.snapshots.SnapshotStateList<MediaChoice>,
     repository: ImprintRepository,
     onAdd: () -> Unit,

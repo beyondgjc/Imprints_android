@@ -16,10 +16,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -37,6 +41,9 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MailOutline
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -64,6 +71,9 @@ import com.beyondguo.imprints.backup.BackupService
 import com.beyondguo.imprints.data.ImprintDatabase
 import com.beyondguo.imprints.data.EntryEntity
 import com.beyondguo.imprints.data.ImprintRepository
+import com.beyondguo.imprints.data.PeriodKind
+import com.beyondguo.imprints.data.ReviewDraft
+import com.beyondguo.imprints.review.ReviewPeriods
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.net.Uri
@@ -72,6 +82,10 @@ import androidx.compose.ui.res.stringResource
 
 private sealed interface Page {
     data object Timeline : Page
+    /** 回顾一级页 */
+    data object Review : Page
+    /** 时光邮箱一级页 */
+    data object Mail : Page
     data object Settings : Page
     data object Recycle : Page
     data object Tags : Page
@@ -82,15 +96,24 @@ private sealed interface Page {
     data class Editor(val id: String?) : Page
     data class LocationDetail(val place: com.beyondguo.imprints.data.PlaceEntity) : Page
     data class RecycleDetail(val id: String) : Page
+    data class LetterEnvelope(val id: String) : Page
+    data class LetterBody(val id: String) : Page
+    data class LetterEditor(val draftId: String?, val letterId: String?, val prefillBody: String = "") : Page
+    data class ReviewWizard(val draftId: String) : Page
+    data class ReviewDetail(val id: String) : Page
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ImprintsApp(
     repository: ImprintRepository,
+    letterRepository: com.beyondguo.imprints.data.LetterRepository,
+    reviewRepository: com.beyondguo.imprints.data.ReviewRepository,
     initialized: Boolean,
     locked: Boolean,
     revealEpoch: Int,
+    pendingLetterTarget: String? = null,
+    onLetterTargetConsumed: () -> Unit = {},
     unlockApp: suspend (String) -> Boolean,
     refreshLockState: suspend () -> Unit,
     requestBiometric: (String, () -> Unit, () -> Unit) -> Unit,
@@ -103,7 +126,7 @@ fun ImprintsApp(
     var pendingScrollToId by remember { mutableStateOf<String?>(null) }
     var pinAction by remember { mutableStateOf<String?>(null) }
     var pinTitle by remember { mutableStateOf("") }
-    var confirmDelete by remember { mutableStateOf<String?>(null) }
+    var confirmDelete by remember { mutableStateOf<RecycleItem?>(null) }
     var confirmDisableFeeling by remember { mutableStateOf(false) }
     var securityEpoch by remember { mutableStateOf(0) }
     // 时间线标签筛选：状态放在导航层，进出详情/编辑后仍保留筛选
@@ -155,12 +178,36 @@ fun ImprintsApp(
     val pageLocationDetail = stringResource(R.string.page_location_detail)
     val editorNewTitle = stringResource(R.string.editor_new_title)
     val editorEditTitle = stringResource(R.string.editor_edit_title)
+    val letterTargetMissing = stringResource(R.string.letter_target_missing)
+    val letterSealed = stringResource(R.string.letter_sealed)
 
     val pinVerifyFeeling6 = stringResource(R.string.pin_verify_feeling_6)
     val errPinLocked = stringResource(R.string.err_pin_locked)
     val errUnlockFailed = stringResource(R.string.err_unlock_failed)
     fun report(error: Throwable) { scope.launch { snackbar.showSnackbar(error.message ?: errGeneric) } }
     fun askPin(action: String, title: String) { pinAction = action; pinTitle = title }
+    // 回顾向导：进入前确定草稿身份（同一个草稿多次提交更新同一个总结 ID）
+    var wizardDraft by remember { mutableStateOf<com.beyondguo.imprints.data.ReviewDraft?>(null) }
+    var sameScopeExistingId by remember { mutableStateOf<String?>(null) }
+    var addLetterToReviewFor by remember { mutableStateOf<String?>(null) }
+    val reviewSaved = stringResource(R.string.review_saved)
+    fun startWizard(kind: String, start: String, end: String, tagIds: List<String>) {
+        val range = runCatching {
+            com.beyondguo.imprints.review.DateRange(java.time.LocalDate.parse(start), java.time.LocalDate.parse(end))
+        }.getOrNull() ?: return
+        scope.launch {
+            val existing = runCatching { reviewRepository.findSameScope(kind, range, tagIds.toSet()) }.getOrNull()
+            val draftId = java.util.UUID.randomUUID().toString()
+            wizardDraft = com.beyondguo.imprints.data.ReviewDraft(
+                draftId = draftId,
+                periodKind = kind,
+                startLocalDate = start,
+                endLocalDateInclusive = end,
+                selectedTagIds = tagIds,
+            )
+            if (existing != null) sameScopeExistingId = existing.id else page = Page.ReviewWizard(draftId)
+        }
+    }
     val createBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         if (uri != null) pendingExportUri = uri else backupPassword = ""
     }
@@ -169,6 +216,47 @@ fun ImprintsApp(
     }
     val active by repository.active.collectAsState(initial = emptyList())
     val recycled by repository.recycled.collectAsState(initial = emptyList())
+    // 时光邮箱 / 回顾：首页提醒区、底部徽标与回收站的三类对象都从这里取
+    val sealedLetters by letterRepository.sealedLetters.collectAsState(initial = emptyList())
+    val recycledLetters by letterRepository.recycledLetters.collectAsState(initial = emptyList())
+    val recycledReviews by reviewRepository.recycledReviews.collectAsState(initial = emptyList())
+    var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    var reviewInvitation by remember { mutableStateOf<Pair<String, com.beyondguo.imprints.review.DateRange>?>(null) }
+    val today = java.time.LocalDate.now()
+    // 前台到点也要更新状态：睡到下一封送达瞬间，最迟每 30 秒醒一次刷新相对文案
+    LaunchedEffect(sealedLetters) {
+        while (true) {
+            nowMs = System.currentTimeMillis()
+            val next = letterRepository.nextDeliveryAtMs(nowMs)
+            val sleepMs = next?.let { (it - nowMs).coerceAtLeast(1_000L) } ?: 30_000L
+            delay(sleepMs.coerceAtMost(30_000L))
+        }
+    }
+    // 到点对账 + 通用提醒（通知能力不可用也不影响到期置顶）
+    LaunchedEffect(nowMs) {
+        val newlyDue = runCatching { letterRepository.refreshDeliveryState(nowMs) }.getOrDefault(emptyList())
+        if (newlyDue.isNotEmpty()) runCatching { com.beyondguo.imprints.mail.LetterNotifier.notifyDue(context) }
+    }
+    // 回顾邀请：最近一个已结束且有印迹的周期（优先年、月、周），已保存/已关闭则不出现
+    LaunchedEffect(today, active.size, sealedLetters.size) {
+        reviewInvitation = runCatching {
+            reviewRepository.invitation(today)?.takeIf { (kind, range) ->
+                !reviewRepository.hasFullScopeReview(kind, range)
+            }
+        }.getOrNull()
+    }
+    // 通知点击进入：通过隐私同意与应用锁后才消费目标，且只带 ID 不带内容
+    LaunchedEffect(pendingLetterTarget, locked, initialized) {
+        val target = pendingLetterTarget ?: return@LaunchedEffect
+        if (!initialized || locked) return@LaunchedEffect
+        onLetterTargetConsumed()
+        when (repository.contentKind(target)) {
+            com.beyondguo.imprints.data.ContentKind.LETTER -> page = Page.LetterEnvelope(target)
+            com.beyondguo.imprints.data.ContentKind.ENTRY -> page = Page.Detail(target)
+            com.beyondguo.imprints.data.ContentKind.REVIEW -> page = Page.ReviewDetail(target)
+            null -> scope.launch { snackbar.showSnackbar(letterTargetMissing) }
+        }
+    }
     var feelingMode by remember { mutableStateOf("OFF") }
     var appLockEnabled by remember { mutableStateOf(false) }
     var appBioEnabled by remember { mutableStateOf(false) }
@@ -225,7 +313,11 @@ fun ImprintsApp(
             scope.launch {
                 runCatching { backup.import(uri, password, importPreview,
                     allowPlaintextConversion = importPreview.feelingMode == "ON" && feelingMode == "OFF") }
-                    .onSuccess { count -> scope.launch { snackbar.showSnackbar(importDone(count)) } }.onFailure(::report)
+                    .onSuccess { count ->
+                        // 导入的历史到期信只在应用内送达，不批量补发系统通知（ML-08 / SYS-02）
+                        runCatching { com.beyondguo.imprints.mail.LetterScheduler.reconcile(context, notify = false) }
+                        scope.launch { snackbar.showSnackbar(importDone(count)) }
+                    }.onFailure(::report)
                 password.fill('\u0000')
                 backupPassword = ""
                 importUri = null
@@ -239,19 +331,28 @@ fun ImprintsApp(
     }
     Box(Modifier.fillMaxSize()) {
     BackHandler(locked) { }
+    // 返回层级：二级页 → 所属一级页；回顾/邮箱 → 印迹；印迹首页 → 系统默认退出
     BackHandler(page != Page.Timeline && !locked) {
         page = when (page) {
             is Page.RecycleDetail -> Page.Recycle
             Page.Tags -> Page.Settings
             is Page.PrivacyPolicy, is Page.UserAgreement -> Page.Settings
+            is Page.ReviewDetail, is Page.ReviewWizard -> Page.Review
+            is Page.LetterEnvelope, is Page.LetterBody, is Page.LetterEditor -> Page.Mail
             else -> Page.Timeline
         }
+    }
+    val topLevelPage = page == Page.Timeline || page == Page.Review || page == Page.Mail
+    val ownHeader = topLevelPage || page is Page.Editor || page is Page.LetterEditor || page is Page.ReviewWizard
+    var showFabMenu by remember { mutableStateOf(false) }
+    val unreadLetters = sealedLetters.count {
+        it.deliveryReadAtMs == null && com.beyondguo.imprints.mail.LetterRules.isDue(it.toEntity(), nowMs)
     }
     CompositionLocalProvider(LocalImprintsLocked provides locked) {
     Scaffold(
         modifier = if (locked) Modifier.clearAndSetSemantics { } else Modifier,
         topBar = {
-            if (page != Page.Timeline && page !is Page.Editor) CenterAlignedTopAppBar(
+            if (!ownHeader && !locked) CenterAlignedTopAppBar(
                 title = { Text(when (page) {
                     Page.Timeline -> stringResource(R.string.timeline_title); Page.Settings -> "设置"; Page.Recycle -> stringResource(R.string.settings_recycle)
                     Page.Tags -> stringResource(R.string.settings_tags)
@@ -261,12 +362,21 @@ fun ImprintsApp(
                     is Page.LocationDetail -> pageLocationDetail
                     Page.PrivacyPolicy -> stringResource(R.string.settings_privacy_policy)
                     Page.UserAgreement -> stringResource(R.string.settings_user_agreement)
+                    Page.Review -> stringResource(R.string.review_title)
+                    Page.Mail -> stringResource(R.string.mail_title)
+                    is Page.LetterEnvelope -> stringResource(R.string.envelope_title)
+                    is Page.LetterBody -> stringResource(R.string.letter_body_title)
+                    is Page.LetterEditor -> stringResource(R.string.letter_new_title)
+                    is Page.ReviewWizard -> stringResource(R.string.review_create)
+                    is Page.ReviewDetail -> stringResource(R.string.review_detail_title)
                 }, color = Ink, fontWeight = FontWeight.Bold, fontSize = 20.sp) },
                 navigationIcon = { IconButton(onClick = {
                     page = when (page) {
                         is Page.RecycleDetail -> Page.Recycle
                         Page.Tags -> Page.Settings
                         is Page.PrivacyPolicy, is Page.UserAgreement -> Page.Settings
+                        is Page.ReviewDetail, is Page.ReviewWizard -> Page.Review
+                        is Page.LetterEnvelope, is Page.LetterBody, is Page.LetterEditor -> Page.Mail
                         else -> Page.Timeline
                     }
                 }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.action_back), tint = Ink) } },
@@ -281,10 +391,63 @@ fun ImprintsApp(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
+        bottomBar = {
+            // 底部顺序固定「印迹 · 回顾 · 时光邮箱」；二级页隐藏底部导航
+            if (topLevelPage && !locked) NavigationBar(containerColor = MaterialTheme.colorScheme.background) {
+                NavigationBarItem(
+                    selected = page == Page.Timeline,
+                    onClick = { page = Page.Timeline },
+                    icon = { Icon(Icons.Default.Home, stringResource(R.string.nav_imprints)) },
+                    label = { Text(stringResource(R.string.nav_imprints)) },
+                )
+                NavigationBarItem(
+                    selected = page == Page.Review,
+                    onClick = { page = Page.Review },
+                    icon = { Icon(Icons.Default.Star, stringResource(R.string.nav_review)) },
+                    label = { Text(stringResource(R.string.nav_review)) },
+                )
+                NavigationBarItem(
+                    selected = page == Page.Mail,
+                    onClick = { page = Page.Mail },
+                    icon = {
+                        // 到期未读徽标：应用锁遮挡期间不显示内容和数量（locked 时整条底栏不渲染）
+                        Box {
+                            Icon(Icons.Default.MailOutline, stringResource(R.string.nav_mail))
+                            if (unreadLetters > 0) Box(
+                                Modifier
+                                    .align(androidx.compose.ui.Alignment.TopEnd)
+                                    .padding(start = 8.dp)
+                                    .size(15.dp)
+                                    .background(Danger, androidx.compose.foundation.shape.CircleShape),
+                                contentAlignment = androidx.compose.ui.Alignment.Center,
+                            ) {
+                                Text(
+                                    if (unreadLetters > 9) "9+" else unreadLetters.toString(),
+                                    color = Color.White, fontSize = 9.sp,
+                                )
+                            }
+                        }
+                    },
+                    label = { Text(stringResource(R.string.nav_mail)) },
+                )
+            }
+        },
         snackbarHost = { SnackbarHost(snackbar) },
-        floatingActionButton = { if (page == Page.Timeline) FloatingActionButton(
-            onClick = { page = Page.Editor(null) }, shape = CircleShape, containerColor = Green,
-            contentColor = Color.White) { Icon(Icons.Default.Add, editorNewTitle) } },
+        floatingActionButton = { when (page) {
+            Page.Timeline -> FloatingActionButton(
+                onClick = { showFabMenu = true }, shape = CircleShape, containerColor = Green,
+                contentColor = Color.White) { Icon(Icons.Default.Add, editorNewTitle) }
+            Page.Mail -> FloatingActionButton(
+                onClick = { page = Page.LetterEditor(null, null) }, shape = CircleShape, containerColor = Green,
+                contentColor = Color.White) { Icon(Icons.Default.Add, stringResource(R.string.mail_write)) }
+            Page.Review -> FloatingActionButton(
+                onClick = {
+                    val month = ReviewPeriods.lastCompletedMonth(today)
+                    startWizard(PeriodKind.MONTH.name, month.start.toString(), month.endInclusive.toString(), emptyList())
+                }, shape = CircleShape, containerColor = Green,
+                contentColor = Color.White) { Icon(Icons.Default.Add, stringResource(R.string.review_create)) }
+            else -> {}
+        } },
     ) { padding ->
         Box(
             Modifier
@@ -292,8 +455,11 @@ fun ImprintsApp(
                 .padding(padding)
                 .consumeWindowInsets(padding),
         ) {
+            // 各一级页切换时保留列表位置/筛选/周期选择
+            val saveableStateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
             when (val current = page) {
-                Page.Timeline -> TimelinePage(active, repository, revealEpoch + securityEpoch,
+                Page.Timeline -> saveableStateHolder.SaveableStateProvider("tab_imprints") {
+                TimelinePage(active, repository, revealEpoch + securityEpoch,
                     onOpen = { page = Page.Detail(it) },
                     onSearch = { page = Page.Search }, onSettings = { page = Page.Settings },
                     onUnlock = { askPin("feeling-unlock", pinUnlockFeeling) },
@@ -329,7 +495,48 @@ fun ImprintsApp(
                                 .onFailure(::report)
                         }
                     },
+                    onOpenEnvelope = { page = Page.LetterEnvelope(it) },
+                    onOpenMail = { page = Page.Mail },
+                    reminderLetters = sealedLetters.filter {
+                        it.deliveryReadAtMs == null && com.beyondguo.imprints.mail.LetterRules.isDue(it.toEntity(), nowMs)
+                    },
+                    reviewInvitation = reviewInvitation,
+                    onOpenReviewInvitation = { kind, range ->
+                        startWizard(kind, range.start.toString(), range.endInclusive.toString(), selectedTagIds.toList())
+                    },
+                    onDismissReviewInvitation = { kind, range ->
+                        scope.launch { runCatching { reviewRepository.closeInvitation(kind, range) } }
+                    },
+                    onReviewMonth = { month ->
+                        val range = com.beyondguo.imprints.review.ReviewPeriods.monthOf(
+                            java.time.LocalDate.parse(month + "-01"),
+                        )
+                        startWizard(PeriodKind.MONTH.name, range.start.toString(), range.endInclusive.toString(), selectedTagIds.toList())
+                    },
                     onError = ::report)
+                }
+                Page.Review -> saveableStateHolder.SaveableStateProvider("tab_review") {
+                    ReviewHomePage(
+                        reviewRepository = reviewRepository,
+                        coreRepository = repository,
+                        nowDate = today,
+                        onStartWizard = ::startWizard,
+                        onOpenReview = { page = Page.ReviewDetail(it) },
+                        onOpenDraft = { page = Page.ReviewWizard(it) },
+                        onDeleteDraft = { id -> scope.launch { runCatching { reviewRepository.deleteDraft(id) }.onFailure(::report) } },
+                        report = ::report,
+                    )
+                }
+                Page.Mail -> saveableStateHolder.SaveableStateProvider("tab_mail") {
+                    MailHomePage(
+                        repository = letterRepository,
+                        nowMs = nowMs,
+                        onOpenEnvelope = { page = Page.LetterEnvelope(it) },
+                        onWrite = { page = Page.LetterEditor(null, null) },
+                        onOpenDraft = { id -> page = Page.LetterEditor(id, null) },
+                        onDeleteDraft = { id -> scope.launch { runCatching { letterRepository.deleteDraft(id) }.onFailure(::report) } },
+                    )
+                }
                 Page.Settings -> SettingsPage(feelingMode, feelingBioEnabled, appLockEnabled, appBioEnabled,
                     onRecycle = { page = Page.Recycle },
                     onTags = { page = Page.Tags },
@@ -391,19 +598,45 @@ fun ImprintsApp(
                 )
                 Page.PrivacyPolicy -> PolicyDocumentPage(stringResource(R.string.settings_privacy_policy), "privacy_policy.txt") { page = Page.Settings }
                 Page.UserAgreement -> PolicyDocumentPage(stringResource(R.string.settings_user_agreement), "user_agreement.txt") { page = Page.Settings }
-                Page.Recycle -> RecyclePage(recycled,
-                    onOpen = { page = Page.RecycleDetail(it) },
-                    onRestore = { id ->
-                        scope.launch {
-                            runCatching { repository.restore(id) }
-                                .onSuccess {
-                                    snackbar.showSnackbar(recycleRestored)
-                                    page = Page.Timeline
-                                }
-                                .onFailure(::report)
+                Page.Recycle -> {
+                    // 回收站三类对象统一体现（ML-08 / RV-07）：信件与总结封面不露正文
+                    val recycleItems = remember(recycled, recycledLetters, recycledReviews) {
+                        recycled.map {
+                            RecycleItem("ENTRY", it.id, it.body, it.deletedAtMs ?: 0L)
+                        } + recycledLetters.map {
+                            RecycleItem("LETTER", it.entryId, it.title, it.deletedAtMs ?: 0L)
+                        } + recycledReviews.map {
+                            RecycleItem("REVIEW", it.id, it.title, it.deletedAtMs ?: 0L)
                         }
-                    },
-                    onDelete = { confirmDelete = it })
+                    }
+                    RecyclePage(recycleItems,
+                        onOpen = { item ->
+                            page = when (item.kind) {
+                                "LETTER" -> Page.LetterBody(item.id)
+                                "REVIEW" -> Page.ReviewDetail(item.id)
+                                else -> Page.RecycleDetail(item.id)
+                            }
+                        },
+                        onRestore = { item ->
+                            scope.launch {
+                                runCatching {
+                                    when (item.kind) {
+                                        "LETTER" -> letterRepository.restore(item.id)
+                                        "REVIEW" -> reviewRepository.restore(item.id)
+                                        else -> repository.restore(item.id)
+                                    }
+                                }
+                                    .onSuccess {
+                                        // 恢复未到期信要重新调度；本次恢复不补发系统通知
+                                        runCatching { com.beyondguo.imprints.mail.LetterScheduler.reconcile(context) }
+                                        snackbar.showSnackbar(recycleRestored)
+                                        page = Page.Timeline
+                                    }
+                                    .onFailure(::report)
+                            }
+                        },
+                        onDelete = { item -> confirmDelete = item })
+                }
                 Page.Tags -> TagsPage(
                     repository = repository,
                     onRename = { id, name ->
@@ -496,6 +729,101 @@ fun ImprintsApp(
                         )
                     },
                     report = ::report)
+                is Page.LetterEnvelope -> LetterEnvelopePage(
+                    repository = letterRepository,
+                    letterId = current.id,
+                    nowMs = nowMs,
+                    onOpenBody = { page = Page.LetterBody(current.id) },
+                    onEdit = { page = Page.LetterEditor(null, current.id) },
+                    onDeleted = {
+                        scope.launch { snackbar.showSnackbar(recycleMoved) }
+                        page = Page.Mail
+                    },
+                    onRescheduled = {
+                        scope.launch { runCatching { com.beyondguo.imprints.mail.LetterScheduler.reconcile(context) } }
+                    },
+                    report = ::report,
+                )
+                is Page.LetterBody -> LetterBodyPage(
+                    repository = letterRepository,
+                    letterId = current.id,
+                    nowMs = nowMs,
+                    onBack = { page = Page.LetterEnvelope(current.id) },
+                    onAddToReview = { addLetterToReviewFor = current.id },
+                    report = ::report,
+                )
+                is Page.LetterEditor -> LetterEditorPage(
+                    repository = letterRepository,
+                    draftId = current.draftId,
+                    letterId = current.letterId,
+                    prefillBody = current.prefillBody,
+                    onSealed = {
+                        scope.launch { snackbar.showSnackbar(letterSealed) }
+                        page = Page.Mail
+                    },
+                    onCancel = { page = Page.Mail },
+                    report = ::report,
+                )
+                is Page.ReviewWizard -> ReviewWizardPage(
+                    reviewRepository = reviewRepository,
+                    letterRepository = letterRepository,
+                    coreRepository = repository,
+                    initialDraft = wizardDraft,
+                    draftId = current.draftId,
+                    onSaved = { id ->
+                        scope.launch { snackbar.showSnackbar(reviewSaved) }
+                        page = Page.ReviewDetail(id)
+                    },
+                    onCancel = { page = Page.Review },
+                    report = ::report,
+                )
+                is Page.ReviewDetail -> ReviewDetailPage(
+                    reviewRepository = reviewRepository,
+                    coreRepository = repository,
+                    letterRepository = letterRepository,
+                    reviewId = current.id,
+                    onOpenEntry = { id ->
+                        scope.launch {
+                            page = if (repository.contentKind(id) == com.beyondguo.imprints.data.ContentKind.LETTER) {
+                                Page.LetterBody(id)
+                            } else {
+                                Page.Detail(id)
+                            }
+                        }
+                    },
+                    onWriteLetter = { closing ->
+                        page = Page.LetterEditor(null, null, prefillBody = closing)
+                    },
+                    onEdit = {
+                        scope.launch {
+                            val detail = reviewRepository.detail(current.id) ?: return@launch
+                            val draftId = java.util.UUID.randomUUID().toString()
+                            val sources = detail.sources
+                            wizardDraft = ReviewDraft(
+                                draftId = draftId,
+                                reviewId = current.id,
+                                periodKind = detail.review.periodKind,
+                                startLocalDate = detail.review.startLocalDate,
+                                endLocalDateInclusive = detail.review.endLocalDateInclusive,
+                                selectedTagIds = detail.review.selectedTagIds.split(',').filter(String::isNotBlank),
+                                title = detail.review.title,
+                                userBody = detail.review.userBody,
+                                closingText = detail.review.closingText,
+                                coverSourceKey = detail.review.coverSourceKey,
+                                includedKeys = sources.filter { it.included }.map { "${it.sourceKind}:${it.sourceId}" },
+                                featuredKeys = sources.filter { it.featured }
+                                    .sortedBy { it.featuredOrder }
+                                    .map { "${it.sourceKind}:${it.sourceId}" },
+                            )
+                            page = Page.ReviewWizard(draftId)
+                        }
+                    },
+                    onDelete = {
+                        scope.launch { snackbar.showSnackbar(deleteDone) }
+                        page = Page.Review
+                    },
+                    report = ::report,
+                )
             }
         }
     }
@@ -572,6 +900,8 @@ fun ImprintsApp(
                     )
                 )
                 append(" ")
+                append(stringResource(R.string.import_preview_types, preview.letters, preview.reviews, preview.drafts))
+                append(" ")
                 append(stringResource(R.string.import_preview_size, preview.attachmentBytes / (1024 * 1024)))
                 if (preview.feelingMode == "ON" && feelingMode == "OFF") {
                     append(" ")
@@ -584,15 +914,82 @@ fun ImprintsApp(
             }) { Text(if (preview.feelingMode == "ON" && feelingMode == "OFF") stringResource(R.string.import_plain_confirm) else stringResource(R.string.action_import)) } },
             dismissButton = { TextButton(onClick = { backupPreview = null; backupPassword = "" }) { Text(stringResource(R.string.action_cancel)) } })
     }
-    if (!locked) confirmDelete?.let { id ->
+    if (!locked) confirmDelete?.let { item ->
         AlertDialog(onDismissRequest = { confirmDelete = null }, title = { Text(stringResource(R.string.delete_forever_title)) },
             text = { Text(stringResource(R.string.delete_forever_message)) },
             confirmButton = { TextButton(onClick = {
                 confirmDelete = null
-                scope.launch { runCatching { repository.deletePermanently(id) }.onFailure(::report) }
+                scope.launch {
+                    runCatching {
+                        when (item.kind) {
+                            "LETTER" -> {
+                                letterRepository.deletePermanently(item.id)
+                                com.beyondguo.imprints.mail.LetterScheduler.cancel(context, item.id)
+                            }
+                            "REVIEW" -> reviewRepository.deletePermanently(item.id)
+                            else -> repository.deletePermanently(item.id)
+                        }
+                    }.onFailure(::report)
+                }
             }) { Text(stringResource(R.string.action_delete_now)) } },
             dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text(stringResource(R.string.action_cancel)) } })
     }
+    // 同范围已有总结：打开已有 / 另建，不直接覆盖（RV-03）
+    if (!locked) sameScopeExistingId?.let { existingId ->
+        AlertDialog(
+            onDismissRequest = { sameScopeExistingId = null },
+            title = { Text(stringResource(R.string.review_existing_title)) },
+            text = { Text(stringResource(R.string.review_existing_message)) },
+            confirmButton = { TextButton(onClick = {
+                sameScopeExistingId = null
+                page = Page.ReviewDetail(existingId)
+            }) { Text(stringResource(R.string.review_open_existing)) } },
+            dismissButton = { TextButton(onClick = {
+                sameScopeExistingId = null
+                wizardDraft?.draftId?.let { page = Page.ReviewWizard(it) }
+            }) { Text(stringResource(R.string.review_create_new)) } },
+        )
+    }
+    // 已读信主动加入指定总结（逐条、显式来源标识，ML-05 / RV-05）
+    if (!locked) addLetterToReviewFor?.let { letterId ->
+        val reviews by reviewRepository.activeReviews.collectAsState(initial = emptyList())
+        AlertDialog(
+            onDismissRequest = { addLetterToReviewFor = null },
+            title = { Text(stringResource(R.string.letter_add_to_review)) },
+            text = {
+                Column {
+                    if (reviews.isEmpty()) Text(stringResource(R.string.review_empty_sub), color = Quiet, fontSize = 13.sp)
+                    reviews.forEach { review ->
+                        TextButton(onClick = {
+                            addLetterToReviewFor = null
+                            scope.launch {
+                                runCatching { reviewRepository.addLetterSource(review.id, letterId) }
+                                    .onSuccess { snackbar.showSnackbar(reviewSaved) }
+                                    .onFailure(::report)
+                            }
+                        }) { Text(review.title.ifBlank { review.startLocalDate }) }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { addLetterToReviewFor = null }) { Text(stringResource(R.string.action_cancel)) } },
+        )
+    }
+    // FAB「＋」：记录印迹 / 给未来写信（ML-01 入口）
+    if (!locked && showFabMenu) AlertDialog(
+        onDismissRequest = { showFabMenu = false },
+        title = { Text(stringResource(R.string.editor_new_title)) },
+        text = {
+            Column {
+                TextButton(onClick = { showFabMenu = false; page = Page.Editor(null) }) {
+                    Text(stringResource(R.string.action_record_imprint), color = Ink, fontSize = 15.sp)
+                }
+                TextButton(onClick = { showFabMenu = false; page = Page.LetterEditor(null, null) }) {
+                    Text(stringResource(R.string.mail_write), color = Green, fontSize = 15.sp)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = { showFabMenu = false }) { Text(stringResource(R.string.action_cancel)) } },
+    )
     if (!locked && confirmDisableFeeling) AlertDialog(
         onDismissRequest = { confirmDisableFeeling = false },
         title = { Text(stringResource(R.string.disable_feeling_title)) },
@@ -921,16 +1318,20 @@ private fun BackupPasswordDialog(title: String, onDismiss: () -> Unit, onConfirm
         shape = androidx.compose.foundation.shape.RoundedCornerShape(22.dp), containerColor = Color.White)
 }
 
+/** 回收站条目：印迹 / 信件 / 总结 三类对象统一展示。 */
+private data class RecycleItem(val kind: String, val id: String, val title: String, val deletedAtMs: Long)
+
 @Composable
-private fun RecyclePage(entries: List<EntryEntity>, onOpen: (String) -> Unit,
-    onRestore: (String) -> Unit, onDelete: (String) -> Unit) {
+private fun RecyclePage(items: List<RecycleItem>, onOpen: (RecycleItem) -> Unit,
+    onRestore: (RecycleItem) -> Unit, onDelete: (RecycleItem) -> Unit) {
+    val sorted = remember(items) { items.sortedByDescending { it.deletedAtMs } }
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item { OutlinePanel(Modifier.fillMaxWidth()) {
             Text(stringResource(R.string.recycle_intro), Modifier.padding(18.dp),
                 color = Quiet, fontSize = 14.sp, lineHeight = 22.sp)
         } }
-        item { Text(stringResource(R.string.recycle_count, entries.size), Modifier.padding(top = 10.dp), color = Quiet, fontSize = 14.sp) }
-        if (entries.isEmpty()) {
+        item { Text(stringResource(R.string.recycle_count, sorted.size), Modifier.padding(top = 10.dp), color = Quiet, fontSize = 14.sp) }
+        if (sorted.isEmpty()) {
             item { Text(stringResource(R.string.recycle_empty), Modifier.fillMaxWidth().padding(top = 48.dp),
                 color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
@@ -938,18 +1339,27 @@ private fun RecyclePage(entries: List<EntryEntity>, onOpen: (String) -> Unit,
                 color = Quiet, fontSize = 13.sp,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
         }
-        items(entries, key = { it.id }) { entry ->
-            OutlinePanel(Modifier.fillMaxWidth().clickable { onOpen(entry.id) }) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                Text(entry.eventLocalMinute.replace('T', ' '), color = Quiet, fontSize = 12.sp)
-                Text(entry.body.ifBlank { stringResource(R.string.entry_media_only) }, color = Ink, fontSize = 16.sp, maxLines = 3)
-                Text(entry.deletedAtMs?.let(::RecycleCountdown) ?: "", color = Quiet, fontSize = 12.sp)
+        items(sorted, key = { it.kind + "-" + it.id }) { item ->
+            OutlinePanel(Modifier.fillMaxWidth().clickable { onOpen(item) }) { Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                Text(
+                    when (item.kind) {
+                        "LETTER" -> stringResource(R.string.mail_type_letter)
+                        "REVIEW" -> stringResource(R.string.recycle_type_review)
+                        else -> stringResource(R.string.recycle_type_entry)
+                    } + " · " + item.deletedAtMs.let { RecycleCountdown(it) },
+                    color = Quiet, fontSize = 12.sp,
+                )
+                Text(
+                    item.title.ifBlank { stringResource(R.string.entry_media_only) },
+                    color = Ink, fontSize = 16.sp, maxLines = 3,
+                )
                 Text(stringResource(R.string.recycle_expiry), color = Quiet, fontSize = 11.sp)
                 FineDivider()
-                Row { TextButton(onClick = { onRestore(entry.id) }) { Text(stringResource(R.string.action_restore), color = Green) }
-                    TextButton(onClick = { onDelete(entry.id) }) { Text(stringResource(R.string.action_delete_forever), color = Quiet) } }
+                Row { TextButton(onClick = { onRestore(item) }) { Text(stringResource(R.string.action_restore), color = Green) }
+                    TextButton(onClick = { onDelete(item) }) { Text(stringResource(R.string.action_delete_forever), color = Quiet) } }
             } }
         }
-        if (entries.isNotEmpty()) item {
+        if (sorted.isNotEmpty()) item {
             Text(stringResource(R.string.recycle_hint),
                 Modifier.fillMaxWidth().padding(vertical = 24.dp),
                 color = Quiet, fontSize = 12.sp,

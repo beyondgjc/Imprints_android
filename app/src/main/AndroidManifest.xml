@@ -10,6 +10,12 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- 仅用于 resolve 系统录音机（RECORD_SOUND）；本应用不自己录音 -->
+       <!-- 时光邮箱：到时通知（Android 13+ 运行时申请；拒绝仍保存信件，仅首页置顶） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 送达调度重建：开机、系统时间/时区变化、应用更新后对账 -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 精确提醒（Android 12+ 需用户在「闹钟和提醒」里授权；未授权退化为普通提醒） -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <queries>
         <intent>
             <action android:name="android.provider.MediaStore.RECORD_SOUND" />
@@ -33,6 +39,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
+            android:launchMode="singleTop"
             android:theme="@style/Theme.Imprints"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
@@ -41,6 +48,22 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 送达闹钟；只按信件 ID+版本重新查库，不带任何内容 -->
+        <receiver
+            android:name=".mail.LetterAlarmReceiver"
+            android:exported="false" />
+        <!-- 开机/时间/时区/应用更新后重建调度并补查到期 -->
+        <receiver
+            android:name=".mail.LetterBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

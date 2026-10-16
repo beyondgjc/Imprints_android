@@ -48,6 +48,7 @@ class ImprintRepository(
     val security: ImprintSecurity,
 ) {
     private val dao = database.dao()
+    private val mailDao = database.mailReviewDao()
     val active: Flow<List<EntryEntity>> = dao.activeEntries()
     val recycled: Flow<List<EntryEntity>> = dao.recycledEntries()
     /** 预置标签表；时间线筛选栏与编辑页选项都来自这里。 */
@@ -59,12 +60,48 @@ class ImprintRepository(
 
     suspend fun <T> exclusive(block: suspend () -> T): T = mutation.withLock { block() }
 
+    /**
+     * 普通印迹详情。**信件 id 一律返回 null**：信件正文只经信件安全流程读取
+     * （`LetterRepository.letterDetail`），不能借普通详情路由直接渲染。
+     */
     suspend fun detail(id: String): EntryDetail? {
+        if (mailDao.isLetter(id)) return null
         val entry = dao.entry(id) ?: return null
         return EntryDetail(
             entry, dao.visuals(id), dao.audio(id), dao.feeling(id), entry.placeId?.let { dao.place(it) },
             TagRules.normalizeSelection(dao.tagsOnce(), dao.tagsOf(id)),
         )
+    }
+
+    /** 对象类型判定：普通印迹 / 未来信 / 总结 / 不存在。所有详情路由都先过这里。 */
+    suspend fun contentKind(id: String): ContentKind? = when {
+        dao.entry(id) != null -> if (mailDao.isLetter(id)) ContentKind.LETTER else ContentKind.ENTRY
+        mailDao.review(id) != null -> ContentKind.REVIEW
+        else -> null
+    }
+
+    /**
+     * 当前仍被引用的全部媒体文件：
+     * entries/信件的 visual_media + audio、总结快照的 review_source_media、
+     * 以及 media_references（草稿与快照所有权）。**物理文件只有不被任何一方引用时才可删。**
+     */
+    suspend fun referencedPaths(): Set<String> =
+        dao.referencedFiles().toSet() + dao.referencedMotionVideos().toSet() +
+            mailDao.mediaRefPaths().toSet() + mailDao.reviewMediaPaths().toSet()
+
+    /** 删除已被替换/清除的附件，但先确认没有其它快照、草稿或对象还在引用。 */
+    suspend fun deleteFilesIfUnreferenced(paths: Collection<String>) {
+        if (paths.isEmpty()) return
+        val refs = referencedPaths()
+        paths.filter { it !in refs }.forEach { path -> runCatching { files.resolve(path).delete() } }
+    }
+
+    /** 登记某个对象对一组文件的所有权（整体替换语义）。 */
+    suspend fun registerMediaOwner(ownerKind: String, ownerId: String, paths: Collection<String>) {
+        mailDao.deleteMediaRefs(ownerKind, ownerId)
+        if (paths.isNotEmpty()) {
+            mailDao.insertMediaRefs(paths.map { MediaReferenceEntity(ownerKind, ownerId, it) })
+        }
     }
 
     /** 当前可用于新建标签的余量判断依据。 */
@@ -178,12 +215,18 @@ class ImprintRepository(
                 // 标签整体替换：多挂/少挂都在这里一次性对齐
                 dao.deleteEntryTags(id)
                 if (tagIds.isNotEmpty()) dao.insertEntryTags(tagIds.map { EntryTagEntity(id, it) })
+                // 附件所有权：普通印迹名下的文件集合（总结快照/草稿另记，替换附件不得误删）
+                val ownedPaths = visuals.flatMap { listOfNotNull(it.relativePath, it.motionVideoPath) } +
+                    listOfNotNull(audio?.relativePath)
+                registerMediaOwner(OWNER_ENTRY, id, ownedPaths)
             }
             val retained = visuals.flatMap { listOf(it.relativePath) + listOfNotNull(it.motionVideoPath) }.toSet() +
                 listOfNotNull(audio?.relativePath)
-            (oldVisuals.flatMap { listOf(it.relativePath) + listOfNotNull(it.motionVideoPath) } +
-                listOfNotNull(oldAudio?.relativePath))
-                .filter { it !in retained }.forEach { path -> runCatching { files.resolve(path).delete() } }
+            // 被替换掉的附件只有在没有快照/草稿等其它引用时才物理删除
+            deleteFilesIfUnreferenced(
+                (oldVisuals.flatMap { listOf(it.relativePath) + listOfNotNull(it.motionVideoPath) } +
+                    listOfNotNull(oldAudio?.relativePath)).filter { it !in retained },
+            )
             old?.placeId?.takeIf { it != place?.id }?.let { oldPlace ->
                 runCatching { dao.deleteUnusedPlace(oldPlace) }
             }
@@ -196,7 +239,11 @@ class ImprintRepository(
 
     suspend fun moveToRecycle(id: String) = mutation.withLock {
         val entry = dao.entry(id) ?: return@withLock
-        if (entry.deletedAtMs == null) dao.upsertEntry(entry.copy(deletedAtMs = System.currentTimeMillis()))
+        if (entry.deletedAtMs == null) {
+            dao.upsertEntry(entry.copy(deletedAtMs = System.currentTimeMillis()))
+            // 向总结传播：来源进回收站 → 快照原文/媒体/封面/统计贡献立即隐藏
+            mailDao.onSourceRecycled(if (mailDao.isLetter(id)) SourceKind.LETTER.name else SourceKind.ENTRY.name, id)
+        }
     }
 
     /** 恢复回收站条目；不在窗口内或不存在时抛出可提示的错误。 */
@@ -205,26 +252,32 @@ class ImprintRepository(
         check(entry.deletedAtMs != null) { "印迹不在回收站" }
         check(EntryRules.isRestorable(entry.deletedAtMs, System.currentTimeMillis())) { "已超过 7 天保留期，无法恢复" }
         dao.upsertEntry(entry.copy(deletedAtMs = null))
+        mailDao.onSourceRestored(if (mailDao.isLetter(id)) SourceKind.LETTER.name else SourceKind.ENTRY.name, id)
     }
 
     suspend fun deletePermanently(id: String) = mutation.withLock { deletePermanentlyLocked(id) }
 
     private suspend fun deletePermanentlyLocked(id: String) {
         val entry = dao.entry(id) ?: return
+        val sourceKind = if (mailDao.isLetter(id)) SourceKind.LETTER.name else SourceKind.ENTRY.name
         val paths = dao.visuals(id).flatMap { listOf(it.relativePath) + listOfNotNull(it.motionVideoPath) } +
             listOfNotNull(dao.audio(id)?.relativePath)
+        // 向总结传播彻底删除：快照正文与媒体引用清掉，保留无内容占位；返回被释放的文件
+        val released = mailDao.onSourcePurged(sourceKind, id)
         database.withTransaction {
             dao.deleteFts(id)
-            dao.deleteEntry(id)
+            dao.deleteEntry(id) // CASCADE：future_letters / notification events / visuals / audio / feelings / entry_tags
+            mailDao.deleteMediaRefs(OWNER_ENTRY, id)
+            mailDao.deleteMediaRefs(OWNER_LETTER, id)
         }
-        paths.forEach { files.resolve(it).delete() }
+        // 物理文件只在没有任何快照/草稿/对象引用时才删
+        deleteFilesIfUnreferenced(paths + released)
         entry.placeId?.let { dao.deleteUnusedPlace(it) }
     }
 
     suspend fun cleanupExpired() = mutation.withLock {
         dao.expired(EntryRules.recycleCutoff(System.currentTimeMillis())).forEach { deletePermanentlyLocked(it.id) }
-        val refs = dao.referencedFiles().toSet() + dao.referencedMotionVideos().toSet()
-        files.cleanup(refs)
+        files.cleanup(referencedPaths())
     }
 
     suspend fun searchBody(input: String): List<EntryEntity> {

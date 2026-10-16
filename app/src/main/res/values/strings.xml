@@ -187,6 +187,7 @@
     <string name="bio_title_app_enable">开启应用锁生物识别</string>
     <string name="bio_title_app_unlock">解锁印迹</string>
     <string name="format_date_md">%1$d月%2$d日</string>
+    <string name="format_datetime_ymd_hm">%1$d年%2$d月%3$d日 %4$02d:%5$02d</string>
     <string name="format_date_md_weekday">%1$d月%2$d日 · %3$s</string>
     <string name="format_ymd_weekday">%1$d年%2$d月%3$d日 · %4$s</string>
     <string name="format_distance_m">%1$d米内</string>
@@ -197,7 +198,8 @@
     <string name="audio_click_play">点击播放</string>
     <string name="action_close">关闭</string>
 
-    <string name="import_preview_main">印迹 %1$d 条，附件 %2$d 个；重复 %3$d 条，过期回收站 %4$d 条。</string>
+    <string name="import_preview_main">普通印迹 %1$d 条，附件 %2$d 个；重复 %3$d 条，过期回收站 %4$d 条。</string>
+    <string name="import_preview_types">信件 %1$d 封，总结 %2$d 篇，草稿 %3$d 篇。</string>
     <string name="import_preview_size">待写入附件约 %1$d MiB，导入期间需额外空间。</string>
     <string name="import_preview_plaintext_warning">备份中的感受原为加密状态，导入本机后将以明文保存。</string>
     <string name="detail_recorded_at">记录于 %1$s %2$02d:%3$02d</string>
@@ -304,4 +306,165 @@
     <string name="perm_settings_message">印迹用位置帮你找到当前附近的地点。\n\n不会在后台定位，不会上传你的位置；你也可以选择直接搜索地点。</string>
     <string name="perm_settings_confirm">去设置</string>
     <string name="perm_settings_cancel">用搜索就好</string>
+
+    <!-- 时光邮箱：通知渠道与通用提醒文案（不含标题/正文/附件/地点） -->
+    <string name="mail_channel_name">时光邮箱</string>
+    <string name="mail_channel_desc">未来信送达时的提醒</string>
+    <string name="mail_notify_title">印迹 · 一封来自过去的信已送达</string>
+    <string name="mail_notify_text">过去的你，给现在的你留了一些话。点击拆开。</string>
+    <string name="mail_notify_summary_title">你有 %1$d 封来自过去的信</string>
+    <string name="mail_notify_summary_text">点击查看。</string>
+
+    <!-- 底部三个一级入口 -->
+    <string name="nav_imprints">印迹</string>
+    <string name="nav_review">回顾</string>
+    <string name="nav_mail">时光邮箱</string>
+    <string name="nav_mail_badge">有 %1$d 封到期未读的信</string>
+
+    <!-- 印迹首页 · 时光提醒 -->
+    <string name="home_reminder_title">时光提醒</string>
+    <string name="home_letter_from_past">来自过去的你</string>
+    <string name="home_letter_open">拆开这封信</string>
+    <string name="home_letter_multi">你有 %1$d 封来自过去的信</string>
+    <string name="home_letter_view_all">查看全部</string>
+    <string name="home_review_invite_week">上周留下了 %1$d 条印迹，回头看看</string>
+    <string name="home_review_invite_month">上月留下了 %1$d 条印迹，回头看看</string>
+    <string name="home_review_invite_year">去年留下了 %1$d 条印迹，回头看看</string>
+    <string name="home_review_invite_action">回顾</string>
+    <string name="home_review_invite_dismiss">不再提示</string>
+    <string name="month_menu_review">回顾这个月</string>
+
+    <!-- 时光邮箱列表 -->
+    <string name="mail_title">时光邮箱</string>
+    <string name="mail_tab_pending">待送达</string>
+    <string name="mail_tab_delivered">已送达</string>
+    <string name="mail_drafts">草稿</string>
+    <string name="mail_draft_badge">%1$d 篇草稿</string>
+    <string name="mail_write">写一封信</string>
+    <string name="mail_empty_pending">还没有待送达的信</string>
+    <string name="mail_empty_pending_sub">写一封信给未来的自己</string>
+    <string name="mail_empty_delivered">还没有已送达的信</string>
+    <string name="mail_empty_delivered_sub">到期的信会出现在这里，等待你拆开</string>
+    <string name="mail_empty_drafts">还没有草稿</string>
+    <string name="mail_unread_only">只看未读</string>
+    <string name="mail_letter_default_title">给未来的自己</string>
+    <string name="mail_deliver_today">今天送达</string>
+    <string name="mail_deliver_tomorrow">明天送达</string>
+    <string name="mail_deliver_on">%1$s 送达</string>
+    <string name="mail_remaining_days">还有 %1$d 天</string>
+    <string name="mail_written_on">写于 %1$s</string>
+    <string name="mail_state_unread">未拆</string>
+    <string name="mail_state_read">已读</string>
+    <string name="mail_type_letter">信件</string>
+
+    <!-- 写信编辑器 -->
+    <string name="letter_new_title">给未来写信</string>
+    <string name="letter_edit_title">编辑信件</string>
+    <string name="letter_title_hint">标题（可不填）</string>
+    <string name="letter_body_hint">写给未来的自己…</string>
+    <string name="letter_seal">封存</string>
+    <string name="letter_sealed">已封存</string>
+    <string name="letter_deliver_row">送达时间</string>
+    <string name="letter_deliver_pick">选择送达时间</string>
+    <string name="letter_quick_month">一个月后</string>
+    <string name="letter_quick_year">一年后</string>
+    <string name="letter_quick_custom">自选</string>
+    <string name="letter_notify_row">到时通知</string>
+    <string name="letter_notify_on">到时提醒你拆开</string>
+    <string name="letter_notify_off">不发系统通知</string>
+    <string name="letter_seal_confirm_title">封存这封信</string>
+    <string name="letter_seal_confirm_message">这封信将在 %1$s 送达。送达后会在首页置顶，等待你拆开。</string>
+    <string name="letter_body_required">信件正文不能为空</string>
+    <string name="letter_deliver_required">请选择送达时间</string>
+    <string name="letter_deliver_future">送达时间必须晚于当前时刻</string>
+    <string name="letter_draft_save">保存草稿</string>
+    <string name="letter_draft_discard">放弃</string>
+    <string name="letter_draft_saved">草稿已保存</string>
+    <string name="letter_notify_permission_off">到期会在首页置顶，系统通知未开启</string>
+    <string name="letter_notify_permission_settings">去开启通知</string>
+    <string name="letter_exact_off">普通提醒，后台通知可能延迟</string>
+    <string name="letter_exact_request">开启精确提醒</string>
+    <string name="letter_time_ambiguous">该时间在时区切换日重复，已按较早时间送达</string>
+    <string name="letter_time_missing">该时间在所选时区不存在，请重新选择</string>
+
+    <!-- 信封 / 拆信 -->
+    <string name="envelope_title">信封</string>
+    <string name="envelope_open">拆开这封信</string>
+    <string name="envelope_peek">提前查看</string>
+    <string name="envelope_peek_confirm_title">提前查看</string>
+    <string name="envelope_peek_confirm_message">提前查看不会取消原定送达。</string>
+    <string name="envelope_reschedule">改期</string>
+    <string name="envelope_delete">删除</string>
+    <string name="envelope_written">写于 %1$s</string>
+    <string name="envelope_deliver">约定送达 %1$s</string>
+    <string name="envelope_delivered_at">送达于 %1$s</string>
+    <string name="envelope_first_read">首次到期阅读 %1$s</string>
+    <string name="envelope_first_opened">首次打开 %1$s</string>
+    <string name="envelope_reseal_edit_hint">编辑正文或附件需先确认提前查看</string>
+    <string name="letter_delete_message">删除后这封信会移入回收站，保留 7 天，期间可以恢复。</string>
+    <string name="letter_target_missing">这封信已移入回收站或已不存在</string>
+    <string name="action_record_imprint">记录印迹</string>
+    <string name="letter_body_title">信件正文</string>
+    <string name="review_detail_title">总结</string>
+    <string name="letter_add_to_review">加入回顾</string>
+    <string name="letter_open_failed">正文加载失败</string>
+    <string name="letter_media_broken">部分附件无法显示</string>
+    <string name="letter_retry">重试</string>
+
+    <!-- 回收站对象类型 -->
+    <string name="recycle_type_entry">印迹</string>
+    <string name="recycle_type_review">总结</string>
+
+    <!-- 回顾 -->
+    <string name="review_title">回顾</string>
+    <string name="review_this_week">本周留下了 %1$d 条印迹</string>
+    <string name="review_this_week_action">回顾本周</string>
+    <string name="review_kind_week">周</string>
+    <string name="review_kind_month">月</string>
+    <string name="review_kind_year">年</string>
+    <string name="review_kind_custom">自选</string>
+    <string name="review_pending">待回顾</string>
+    <string name="review_mine">我的总结</string>
+    <string name="review_create">创建回顾</string>
+    <string name="review_step_range">范围与标签</string>
+    <string name="review_step_pick">挑选片段</string>
+    <string name="review_step_write">整理总结</string>
+    <string name="review_as_of_today">截至今天</string>
+    <string name="review_included_count">已纳入 %1$d 条</string>
+    <string name="review_featured_count">精选 %1$d 条</string>
+    <string name="review_stat_entries">纳入的记录</string>
+    <string name="review_stat_days">记录天数</string>
+    <string name="review_stat_visuals">视觉媒体</string>
+    <string name="review_stat_tags">记录最多的标签</string>
+    <string name="review_stat_letters">来自时光邮箱的片段</string>
+    <string name="review_label_overview">生活概况</string>
+    <string name="review_label_snippets">这一段的片段</string>
+    <string name="review_label_summary">我的总结</string>
+    <string name="review_prompt">发生了什么／什么值得记住／想对下阶段说什么</string>
+    <string name="review_closing">结语（可不填）</string>
+    <string name="review_save">保存回顾</string>
+    <string name="review_saved">回顾已保存</string>
+    <string name="review_title_hint">标题（可不填）</string>
+    <string name="review_source_entry">查看原印迹</string>
+    <string name="review_source_letter">来自时光邮箱</string>
+    <string name="review_source_recycled">来源已移入回收站</string>
+    <string name="review_source_purged">来源已彻底删除</string>
+    <string name="review_changed">来源记录有变化</string>
+    <string name="review_update">更新回顾</string>
+    <string name="review_update_added">新增</string>
+    <string name="review_update_changed">变化</string>
+    <string name="review_update_removed">移除</string>
+    <string name="review_update_apply">保存更新</string>
+    <string name="review_write_letter">给下一阶段的自己写信</string>
+    <string name="review_empty">还没有可回顾的记录</string>
+    <string name="review_empty_sub">换个时间范围，或直接写总结</string>
+    <string name="review_direct_write">直接写总结</string>
+    <string name="review_delete_hint">删除总结不会删除来源印迹或信件</string>
+    <string name="review_existing_title">该范围已有总结</string>
+    <string name="review_existing_message">打开已有总结，或另建一个专题？</string>
+    <string name="review_open_existing">打开已有</string>
+    <string name="review_create_new">另建一个</string>
+    <string name="review_add_letter">加入信件</string>
+    <string name="review_pick_hint">默认纳入全部匹配的印迹，可逐条取消；精选片段会展示在总结里</string>
+    <string name="review_cover_pick">选择封面</string>
 </resources>

@@ -22,11 +22,13 @@ import org.junit.runner.RunWith
  * 数据库迁移实测（设备上跑，内存库不覆盖迁移路径）。
  *
  * 做法：用历史 `app/schemas/.../{2,3}.json` 里 Room 自己生成的原始 DDL 建成旧库并写入旧数据，
- * 再让 Room 以当前代码（version = 5 + 迁移链）打开它。
+ * 再让 Room 以当前代码（version = 6 + 迁移链）打开它。
  * 迁移 DDL 与 Room 期望的结构只要有一点不一致，Room 就会在这里直接抛错。
  *
- * 重点覆盖 v4→v5：预置标签由 5 个收敛为「家事 / 国事 / 天下事」3 个，
- * 旧库里的 5 行必须原地保留（改名的改名、停用的停用），挂载关系不能丢。
+ * 重点覆盖：
+ * - v4→v5：预置标签由 5 个收敛为「家事 / 国事 / 天下事」3 个，旧行原地保留，挂载关系不丢；
+ * - v5→v6：新增时光邮箱（信件）与回顾（总结/快照/草稿）表，普通印迹与媒体原样保留，
+ *   信件与总结可以正常读写，且信件不出现在普通时间线/搜索里。
  */
 @RunWith(AndroidJUnit4::class)
 class ImprintMigrationTest {
@@ -59,6 +61,7 @@ class ImprintMigrationTest {
             ImprintDatabase.MIGRATION_2_3,
             ImprintDatabase.MIGRATION_3_4,
             ImprintDatabase.MIGRATION_4_5,
+            ImprintDatabase.MIGRATION_5_6,
         )
         .build()
 
@@ -146,7 +149,7 @@ class ImprintMigrationTest {
         }
         val db = openWithRoom()
         try {
-            assertEquals(5, userVersion(db))
+            assertEquals(6, userVersion(db))
             runBlocking {
                 val tags = db.dao().tagsOnce()
                 // v3 时代落库的 5 个预置行 + 1 个自定义标签，一个都不能丢（v5 只是停用 work/travel，不删行）
@@ -212,7 +215,7 @@ class ImprintMigrationTest {
 
         val db = openWithRoom()
         try {
-            assertEquals(5, userVersion(db))
+            assertEquals(6, userVersion(db))
             runBlocking {
                 val tags = db.dao().tagsOnce()
                 // 5 行原样保留：3 个启用（改名）+ 2 个停用
@@ -247,7 +250,7 @@ class ImprintMigrationTest {
         createLegacyDatabase(version = 2, schema = V2_SCHEMA)
         val db = openWithRoom()
         try {
-            assertEquals(5, userVersion(db))
+            assertEquals(6, userVersion(db))
             runBlocking {
                 val tags = db.dao().tagsOnce()
                 // v2 没有标签表，迁移链一路补到 v5：只种当前的 3 个启用预置，不产生停用行
@@ -260,6 +263,71 @@ class ImprintMigrationTest {
                 // v2 老印迹没有标签，升级后仍可读
                 assertEquals("迁移前写下的旧印迹", db.dao().entry(legacyEntryId)?.body)
                 assertTrue(db.dao().tagsOf(legacyEntryId).isEmpty())
+            }
+        } finally {
+            db.close()
+        }
+    }
+
+    /**
+     * v5→v6：新增时光邮箱（信件）与回顾（总结/快照/草稿）表。
+     *
+     * 旧库升级后：普通印迹与标签原样保留；新表完整可用；
+     * 信件写入后**不出现在**普通时间线/搜索里（类型隔离在数据层，不是 UI 过滤）。
+     */
+    @Test
+    fun migrationFromV5AddsMailAndReviewTables() {
+        // v5 与 v4 表结构相同（v4→v5 只改行不改表），旧库按 v4 结构建成 user_version = 5
+        createLegacyDatabase(version = 5, schema = V4_SCHEMA)
+        val db = openWithRoom()
+        try {
+            assertEquals(6, userVersion(db))
+            runBlocking {
+                // 原有数据不动
+                assertEquals("迁移前写下的旧印迹", db.dao().entry(legacyEntryId)?.body)
+
+                val files = MediaFiles(context)
+                val security = ImprintSecurity(db)
+                val core = ImprintRepository(db, files, security)
+                val letters = LetterRepository(db, files, core)
+                val reviews = ReviewRepository(db, files, core)
+
+                // 新表可用：信件可封存
+                val letterId = letters.seal(
+                    LetterDraft(
+                        title = "未来",
+                        body = "给未来的一封信",
+                        deliverLocalMinute = "2099-01-01T09:00",
+                        deliverZoneId = "Asia/Shanghai",
+                    ),
+                )
+                // 类型隔离：信件不出现在普通时间线/搜索里
+                assertTrue(db.dao().activeEntriesOnce().none { it.id == letterId })
+                assertTrue(core.searchBody("给未来的一封信").none { it.id == letterId })
+                assertEquals(ContentKind.LETTER, core.contentKind(letterId))
+                assertEquals(ContentKind.ENTRY, core.contentKind(legacyEntryId))
+                assertEquals("给未来的一封信", letters.letterDetail(letterId)?.entry?.body)
+                assertEquals(1, db.mailReviewDao().sealedLettersList().size)
+
+                // 总结可保存，且不作为普通印迹候选
+                val reviewId = reviews.save(
+                    ReviewDraft(
+                        periodKind = "MONTH",
+                        startLocalDate = "2026-01-01",
+                        endLocalDateInclusive = "2026-01-31",
+                        title = "一月回顾",
+                        userBody = "总结正文",
+                    ),
+                )
+                assertEquals("一月回顾", reviews.review(reviewId)?.title)
+                assertEquals(ContentKind.REVIEW, core.contentKind(reviewId))
+                assertTrue(db.dao().activeEntriesOnce().none { it.id == reviewId })
+                // 旧印迹仍可被回顾候选读取（按事件日期归类）
+                val january = com.beyondguo.imprints.review.DateRange(
+                    java.time.LocalDate.of(2026, 1, 1),
+                    java.time.LocalDate.of(2026, 1, 31),
+                )
+                assertEquals(listOf(legacyEntryId), reviews.candidates(january, emptySet()).map { it.entry.id })
             }
         } finally {
             db.close()

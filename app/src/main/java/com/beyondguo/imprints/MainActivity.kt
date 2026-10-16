@@ -34,6 +34,14 @@ class MainActivity : FragmentActivity() {
     private val database by lazy { ImprintDatabase.get(this) }
     private val security by lazy { ImprintSecurity(database) }
     private val repository by lazy { ImprintRepository(database, MediaFiles(this), security) }
+    private val letterRepository by lazy {
+        com.beyondguo.imprints.data.LetterRepository(database, MediaFiles(this), repository)
+    }
+    private val reviewRepository by lazy {
+        com.beyondguo.imprints.data.ReviewRepository(database, MediaFiles(this), repository)
+    }
+    /** 通知点击目标（只带信件 ID，不带内容）；解锁并过隐私门后才消费 */
+    private var pendingLetterTarget = androidx.compose.runtime.mutableStateOf<String?>(null)
     private var appLocked = androidx.compose.runtime.mutableStateOf(true)
     private var initialized = androidx.compose.runtime.mutableStateOf(false)
     private var lockEnabled = false
@@ -87,6 +95,10 @@ class MainActivity : FragmentActivity() {
         // 同意状态只读 SharedPreferences，不触碰 Room/Keystore
         consentGranted = com.beyondguo.imprints.privacy.ConsentState.isAccepted(this)
 
+        // 通知点击进入：只带信件 ID；真正消费要等同意 + 应用锁通过（ML-06）
+        pendingLetterTarget.value =
+            intent?.getStringExtra(com.beyondguo.imprints.mail.LetterNotifier.EXTRA_LETTER_ID)
+
         if (consentGranted == true) {
             startApp()
         }
@@ -112,9 +124,13 @@ class MainActivity : FragmentActivity() {
                 } else {
                     ImprintsApp(
                         repository = repository,
+                        letterRepository = letterRepository,
+                        reviewRepository = reviewRepository,
                         initialized = initialized.value,
                         locked = appLocked.value,
                         revealEpoch = revealEpoch.intValue,
+                        pendingLetterTarget = pendingLetterTarget.value,
+                        onLetterTargetConsumed = { pendingLetterTarget.value = null },
                         unlockApp = { pin ->
                             val ok = security.verifyAppLock(pin)
                             if (ok) appLocked.value = false
@@ -160,6 +176,14 @@ class MainActivity : FragmentActivity() {
         )
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // 热启动的通知点击：更新目标，由安全门后消费
+        intent.getStringExtra(com.beyondguo.imprints.mail.LetterNotifier.EXTRA_LETTER_ID)?.let {
+            pendingLetterTarget.value = it
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         com.beyondguo.imprints.privacy.PrivacyPreferences.apply(this)
@@ -172,6 +196,8 @@ class MainActivity : FragmentActivity() {
         lifecycleScope.launch {
             runCatching { repository.cleanupExpired() }
             runCatching { BackupService(this@MainActivity, database, repository).cleanupInterruptedImports() }
+            // 送达调度对账：补查到期状态、重建未来调度（重启/强停/时间变化后的修复窗口）
+            runCatching { com.beyondguo.imprints.mail.LetterScheduler.reconcile(this@MainActivity) }
         }
     }
 

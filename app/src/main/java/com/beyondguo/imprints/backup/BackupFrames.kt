@@ -12,10 +12,19 @@ import java.security.SecureRandom
 import java.util.UUID
 
 private const val MAGIC = "IMPRINTS-BACKUP"
-private const val VERSION = 1
+/**
+ * 外层格式版本：
+ * - v1：只有普通印迹（1.5 及之前）；
+ * - v2：新增信件 / 总结 / 草稿等对象类型（1.6+）。
+ *
+ * **新备份一律写 v2**：旧版 reader 在 `readHeader` 处显式拒绝（「不支持的备份格式」），
+ * 不能让旧版把未来信当普通印迹悄悄导进时间线。新版 reader 仍可读 v1（缺的集合按空处理）。
+ */
+private const val VERSION = 2
+private const val MIN_SUPPORTED_VERSION = 1
 private const val CHUNK = 1024 * 1024
 
-internal data class BackupHeader(val uuid: String, val salt: ByteArray, val memoryKiB: Int, val iterations: Int, val parallelism: Int) {
+internal data class BackupHeader(val uuid: String, val salt: ByteArray, val memoryKiB: Int, val iterations: Int, val parallelism: Int, val version: Int = VERSION) {
     fun key(password: CharArray): ByteArray {
         val root = Aead.argon2id(String(password).toByteArray(Charsets.UTF_8), salt, memoryKiB, iterations, parallelism)
         return try { Aead.subKey(root, "imprints-backup-v1") } finally { root.fill(0) }
@@ -37,17 +46,20 @@ internal fun createHeader(out: DataOutputStream): BackupHeader {
 }
 
 internal fun readHeader(input: DataInputStream): BackupHeader {
-    require(input.readUTF() == MAGIC && input.readInt() == VERSION) { "不支持的备份格式" }
+    require(input.readUTF() == MAGIC) { "不支持的备份格式" }
+    val version = input.readInt()
+    // 旧版读到 v2 会在这里失败；新版读 v1 继续兼容
+    require(version in MIN_SUPPORTED_VERSION..VERSION) { "不支持的备份格式" }
     val uuid = input.readUTF()
     UUID.fromString(uuid)
     val saltLength = input.readInt()
     require(saltLength == 16) { "备份盐长度错误" }
-    val salt = ByteArray(16).also { input.readFully(it) }
+    val salt = ByteArray(saltLength).also { input.readFully(it) }
     val memory = input.readInt()
     val iterations = input.readInt()
     val parallelism = input.readInt()
     require(memory in 16 * 1024..256 * 1024 && iterations in 1..10 && parallelism in 1..4) { "备份 KDF 参数不受支持" }
-    return BackupHeader(uuid, salt, memory, iterations, parallelism)
+    return BackupHeader(uuid, salt, memory, iterations, parallelism, version)
 }
 
 internal class EncryptedFrames(private val output: DataOutputStream, private val header: BackupHeader, private val key: ByteArray) : OutputStream() {
@@ -107,7 +119,7 @@ internal class EncryptedFrames(private val output: DataOutputStream, private val
         return hash
     }
 
-    private fun aad(number: Long, end: Boolean = false) = "${header.uuid}|$VERSION|${if (end) "end|" else ""}$number".toByteArray(Charsets.UTF_8)
+    private fun aad(number: Long, end: Boolean = false) = "${header.uuid}|${header.version}|${if (end) "end|" else ""}$number".toByteArray(Charsets.UTF_8)
 }
 
 internal class DecryptedFrames(private val input: DataInputStream, private val header: BackupHeader, private val key: ByteArray) : InputStream() {
@@ -163,5 +175,5 @@ internal class DecryptedFrames(private val input: DataInputStream, private val h
         sequence++
     }
 
-    private fun aad(number: Long, end: Boolean = false) = "${header.uuid}|$VERSION|${if (end) "end|" else ""}$number".toByteArray(Charsets.UTF_8)
+    private fun aad(number: Long, end: Boolean = false) = "${header.uuid}|${header.version}|${if (end) "end|" else ""}$number".toByteArray(Charsets.UTF_8)
 }
