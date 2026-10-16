@@ -635,7 +635,7 @@ internal fun EventTimePickerSheet(
         Column(
             Modifier
                 .fillMaxWidth()
-                .heightIn(max = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp * 0.88f)
+                .heightIn(max = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp * 0.93f)
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp),
         ) {
@@ -643,7 +643,7 @@ internal fun EventTimePickerSheet(
                 Modifier
                     .weight(1f, fill = false)
                     .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
             Text(title ?: stringResource(R.string.editor_pick_date), color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Text(subtitle ?: stringResource(R.string.editor_pick_date_sub), color = Quiet, fontSize = 13.sp)
@@ -682,7 +682,7 @@ internal fun EventTimePickerSheet(
                     Row(Modifier.fillMaxWidth()) {
                         repeat(7) { col ->
                             val cellIndex = it * 7 + col
-                            Box(Modifier.weight(1f).height(40.dp), contentAlignment = Alignment.Center) {
+                            Box(Modifier.weight(1f).height(36.dp), contentAlignment = Alignment.Center) {
                                 if (cellIndex >= startOffset && dayNumber <= daysInMonth) {
                                     val d = dayNumber
                                     val selected = date.year == viewYear && date.monthValue == viewMonth && date.dayOfMonth == d
@@ -711,9 +711,9 @@ internal fun EventTimePickerSheet(
                 color = Ink, fontSize = 14.sp,
             )
 
-            // 上下滑动选择时分（滚轮）
+            // 上下滑动选择时分（滚轮）：整体高度按一屏内放得下设计（日历+滚轮+操作行同屏可见）
             Row(
-                Modifier.fillMaxWidth().height(160.dp),
+                Modifier.fillMaxWidth().height(124.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -769,7 +769,7 @@ private fun WheelPicker(
     label: (Int) -> String,
     onSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    itemHeight: androidx.compose.ui.unit.Dp = 44.dp,
+    itemHeight: androidx.compose.ui.unit.Dp = 38.dp,
 ) {
     // 虚拟长列表：中间一圈作为起点，两端靠近时无声回中，实现循环滑动
     val cycles = 80
