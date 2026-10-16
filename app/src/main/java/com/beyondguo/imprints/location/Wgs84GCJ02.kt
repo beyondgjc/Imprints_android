@@ -29,7 +29,11 @@ object Wgs84GCJ02 {
         return wgsLat + dLat to wgsLng + dLng
     }
 
-    /** 近似逆变换：GCJ-02 → WGS-84，供外部 geo: 导航使用。 */
+    /**
+     * 近似逆变换：GCJ-02 → WGS-84。
+     * 只在确实需要全球通用真值（例如对接境外地图）时用；
+     * 国内地图 App 与导航都按 GCJ-02 解释坐标，**不要**拿它去「归一化」传给 geo: 的坐标。
+     */
     fun toWgs84(gcjLat: Double, gcjLng: Double): Pair<Double, Double> {
         if (isOutOfChina(gcjLat, gcjLng)) return gcjLat to gcjLng
         val (mgLat, mgLng) = toGcj02(gcjLat, gcjLng)
@@ -37,12 +41,17 @@ object Wgs84GCJ02 {
     }
 
     /**
-     * 按 [coordinateSystem] 归一到 WGS-84（Android geo: / 系统地图惯例）。
+     * 按 [coordinateSystem] 归一到 GCJ-02，供外部地图与导航使用。
+     *
+     * 国内地图 App（高德 / 腾讯 / 百度）收到 `geo:` / `amapuri:` 时都按 GCJ-02 解析坐标 ——
+     * 即使 Android `geo:` 的 RFC 5870 规定是 WGS-84，国内实现并不遵守。
+     * 实测（MI 8 + 高德）：给 geo: 传 WGS-84 会偏西南 300~500 米。
+     *
      * null/未知按 WGS84 处理（手填无坐标不会走到这里）。
      */
-    fun toWgs84(lat: Double, lng: Double, coordinateSystem: String?): Pair<Double, Double> =
-        if (coordinateSystem.equals("GCJ-02", ignoreCase = true)) toWgs84(lat, lng)
-        else lat to lng
+    fun toGcj02(lat: Double, lng: Double, coordinateSystem: String?): Pair<Double, Double> =
+        if (coordinateSystem.equals("GCJ-02", ignoreCase = true)) lat to lng
+        else toGcj02(lat, lng)
 
     private fun transformLat(x: Double, y: Double): Double {
         var ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y +

@@ -57,10 +57,12 @@ fun LocationDetailPage(
     // Toast 在 onClick lambda 里弹（捕获），文案提前取一次避免在回调里查资源
     val noMapAppHint = stringResource(R.string.err_no_map_app)
     BackHandler { onBack() }
+    // 交给外部地图/导航的坐标：国内 App 按 GCJ-02 解析 geo:，所以统一归一到 GCJ-02。
+    // 曾误按 RFC 5870 转成 WGS-84，被高德再当 GCJ-02 用一遍，目的地偏西南 300~500 米。
     val coordinates = if (place.latitude != null && place.longitude != null) {
-        val (wgsLat, wgsLng) = Wgs84GCJ02.toWgs84(
+        val (gcjLat, gcjLng) = Wgs84GCJ02.toGcj02(
             place.latitude, place.longitude, place.coordinateSystem)
-        "$wgsLat,$wgsLng"
+        "$gcjLat,$gcjLng"
     } else null
 
     LazyColumn(
@@ -70,12 +72,9 @@ fun LocationDetailPage(
         item { Spacer(Modifier.height(4.dp)) }
         item {
             // 有坐标：嵌高德真地图（可缩放平移）；无坐标：静态示意 + 点按交给外部地图
+            // 高德地图控件要 GCJ-02：与导航入口用同一套归一逻辑，避免两处走反
             val latLng = if (place.latitude != null && place.longitude != null) {
-                if (place.coordinateSystem.equals("GCJ-02", ignoreCase = true)) {
-                    place.latitude to place.longitude
-                } else {
-                    Wgs84GCJ02.toGcj02(place.latitude, place.longitude)
-                }
+                Wgs84GCJ02.toGcj02(place.latitude, place.longitude, place.coordinateSystem)
             } else null
             Box(
                 Modifier
