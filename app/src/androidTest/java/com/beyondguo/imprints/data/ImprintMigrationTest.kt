@@ -283,8 +283,8 @@ class ImprintMigrationTest {
         try {
             assertEquals(6, userVersion(db))
             runBlocking {
-                // 原有数据不动
-                assertEquals("迁移前写下的旧印迹", db.dao().entry(legacyEntryId)?.body)
+                // 原有数据不动（createLegacyDatabase 对 version > 2 写入的是 v3 文案）
+                assertEquals("v3 时代写下的印迹", db.dao().entry(legacyEntryId)?.body)
 
                 val files = MediaFiles(context)
                 val security = ImprintSecurity(db)

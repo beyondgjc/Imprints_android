@@ -88,13 +88,27 @@ fun ReviewHomePage(
     var kind by remember { mutableStateOf(PeriodKind.MONTH.name) }
     var rangeShift by remember { mutableStateOf(0) }
     var weekEntryCount by remember { mutableStateOf(0) }
+    var customStart by remember { mutableStateOf(nowDate.minusMonths(1).toString()) }
+    var customEnd by remember { mutableStateOf(nowDate.toString()) }
 
     LaunchedEffect(nowDate) {
         runCatching { reviewRepository.candidates(ReviewPeriods.weekOf(nowDate), emptySet()) }
             .onSuccess { weekEntryCount = it.size }
     }
 
-    val range = remember(kind, rangeShift, nowDate) { resolveRange(kind, rangeShift, nowDate) }
+    val range = remember(kind, rangeShift, customStart, customEnd, nowDate) {
+        if (kind == PeriodKind.CUSTOM.name) {
+            // 自选：开始不晚于结束、截止不晚于今天；不合法时退回到最近一个自然月
+            runCatching {
+                val start = LocalDate.parse(customStart)
+                val end = LocalDate.parse(customEnd)
+                ReviewPeriods.validateCustom(start, end, nowDate)
+                DateRange(start, end)
+            }.getOrNull() ?: resolveRange(PeriodKind.MONTH.name, 0, nowDate)
+        } else {
+            resolveRange(kind, rangeShift, nowDate)
+        }
+    }
     val isCurrent = range.endInclusive >= nowDate
 
     Column(Modifier.fillMaxSize()) {
@@ -155,16 +169,14 @@ fun ReviewHomePage(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                var startText by remember { mutableStateOf(nowDate.minusMonths(1).toString()) }
-                var endText by remember { mutableStateOf(nowDate.toString()) }
                 OutlinedTextField(
-                    startText, { startText = it }, singleLine = true, modifier = Modifier.weight(1f),
+                    customStart, { customStart = it }, singleLine = true, modifier = Modifier.weight(1f),
                     label = { Text(stringResource(R.string.review_step_range)) },
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green),
                 )
                 OutlinedTextField(
-                    endText, { endText = it }, singleLine = true, modifier = Modifier.weight(1f),
+                    customEnd, { customEnd = it }, singleLine = true, modifier = Modifier.weight(1f),
                     label = { Text(stringResource(R.string.review_as_of_today)) },
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green),
