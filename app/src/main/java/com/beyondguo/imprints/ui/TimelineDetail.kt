@@ -81,6 +81,7 @@ import com.beyondguo.imprints.data.FeelingEntity
 import com.beyondguo.imprints.data.ImprintRepository
 import com.beyondguo.imprints.data.PlaceEntity
 import com.beyondguo.imprints.data.TagCatalog
+import com.beyondguo.imprints.data.TagRules
 import kotlinx.coroutines.launch
 
 import kotlinx.coroutines.delay
@@ -127,14 +128,12 @@ fun TimelinePage(
     var showTagPanel by remember { mutableStateOf(false) }
     // 标签筛选在内存里做：条目数有限，避免为每种筛选组合再写一套 DAO 查询
     val selectableTags = repository.selectableTags.collectAsState(initial = emptyList()).value
-    // chip 顺序按使用频次降序：越常用越靠左，横滚区里更容易够到。
-    // 频次为 0 或并列的标签保持 selectableTags 原序（预置在前、自定义按创建时间，见 TagRules.TAG_ORDER）。
-    var tagUsage by remember { mutableStateOf(emptyMap<String, Int>()) }
-    LaunchedEffect(selectableTags.map { it.id }, entries) {
-        tagUsage = repository.tagUsageCounts().toMap()
-    }
-    val orderedTags = remember(selectableTags, tagUsage) {
-        selectableTags.sortedByDescending { tagUsage[it.id] ?: 0 }
+    // 行内固定只放内置标签（家事 / 国事 / 天下事），按目录顺序；自定义标签一律收进「更多」。
+    // 例外：已经选中的自定义标签要留在行内 —— 否则用户看不见自己在筛什么，也没法把它点掉。
+    val chipTags = remember(selectableTags, selectedTagIds) {
+        val presets = selectableTags.filter { it.preset }.sortedWith(TagRules.TAG_ORDER)
+        val pickedCustom = selectableTags.filter { !it.preset && it.id in selectedTagIds }
+        presets + pickedCustom
     }
     val tagSelection = repository.entryTags.collectAsState(initial = emptyList()).value
         .groupBy({ it.entryId }, { it.tagId })
@@ -200,9 +199,9 @@ fun TimelinePage(
                     Text(stringResource(R.string.timeline_title), Modifier.weight(1f), color = Ink, fontSize = 34.sp, fontWeight = FontWeight.Bold)
                     IconButton(onClick = onSettings) { Icon(Icons.Default.MoreVert, stringResource(R.string.a11y_settings), tint = Quiet) }
                 }
-                // 标签筛选：单行横向滚动，首位「全部」= 未筛选，多选仍为叠加（OR）
+                // 标签筛选：单行横向滚动，首位「全部」= 未筛选，行内只放内置标签，多选仍为叠加（OR）
                 TagFilterRow(
-                    tags = orderedTags,
+                    tags = chipTags,
                     selectedIds = selectedTagIds,
                     onToggle = onToggleTag,
                     onClear = onClearTags,

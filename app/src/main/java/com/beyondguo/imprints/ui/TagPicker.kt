@@ -570,8 +570,8 @@ fun TagsPage(
 /**
  * 时间线顶部的筛选 chip 行：固定单行、横向滚动，不再随标签增多向下换行。
  * 首位「全部」——未选任何标签时它处于选中态，点它即清空筛选，因此不需要额外的清除入口。
- * [tags] 由调用方按使用频次降序排好；本行只铺前 [maxChips] 个，剩下的交给末尾「更多」。
- * 「更多」打开完整的标签面板（搜索、计数、新建、改名、删除都在那里）。
+ * [tags] 是要铺在这一行里的标签，由调用方决定（时间线只给内置标签）；
+ * 末尾固定「更多」，打开完整的标签面板（搜索、计数、新建、改名、删除都在那里）。
  */
 @Composable
 fun TagFilterRow(
@@ -581,7 +581,6 @@ fun TagFilterRow(
     onClear: () -> Unit,
     onMore: () -> Unit,
     modifier: Modifier = Modifier,
-    maxChips: Int = 6,
 ) {
     LazyRow(
         modifier.fillMaxWidth(),
@@ -594,7 +593,7 @@ fun TagFilterRow(
                 onClick = onClear,
             )
         }
-        items(tags.take(maxChips), key = { it.id }) { tag ->
+        items(tags, key = { it.id }) { tag ->
             TagChip(text = tag.name, selected = tag.id in selectedIds, onClick = { onToggle(tag.id) })
         }
         item(key = "more") {
