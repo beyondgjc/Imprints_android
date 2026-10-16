@@ -35,18 +35,18 @@ app/src/main/java/com/beyondguo/imprints/
 └── ui/                    # Compose：时间线、详情、编辑、搜索、设置、回收站、刮卡、时间穿梭
 ```
 
-## 当前验证状态（2026-10-07 更新）
+## 当前验证状态（2026-10-16 更新）
 
 - Gradle 标准构建 `.\gradlew.bat :app:assembleDebug :app:testDebugUnitTest` **BUILD SUCCESSFUL**（Android Studio JBR 21）。
-- JVM 单元测试 **29** 项通过（备份帧/头、EntryRules、MediaKindDetector、PinPolicy、TimelineLocator、Wgs84GCJ02 等）。
-- 当前版本 **1.4（versionCode 5）**；见下方 Release 1.4。
-- **标签自定义进行中**（2026-10-10，未打 release）：数据库 **version 4**，JVM 单测 **53** 项、设备测试 **41** 项（模拟器 + MI 8 各一遍）全部通过。详见下方「标签：预置 + 用户自定义」。
+- JVM 单元测试 **53** 项通过（标签规则/目录、备份帧/头、EntryRules、MediaKindDetector、PinPolicy、TimelineLocator、Wgs84GCJ02 等）。
+- 当前版本 **1.5（versionCode 6）**；见下方 Release 1.5。
+- **标签系统已随 1.5 发布**：数据库 **version 5**，JVM 单测 **53** 项、设备测试 **41** 项（模拟器 + MI 8 各一遍，2026-10-10 完成）全部通过。详见下方「标签：预置 + 用户自定义」。
 - Git：独立仓；远端 **GitHub 私有** `beyondgjc/Imprints_android`。勿提交 `local.properties` / keystore / 口令。
 - 高德 Key 在本机 `local.properties`（勿提交）。地图/POI 使用 `3dmap-location-search`（MAP so **16KB 对齐**）。
 - **POI 关键字检索已实测可用**（2026-10-12，MI 8 真机输入 `Starbucks` 返回真实结果），说明 Key 已绑定当前签名；换签名需在高德控制台重新绑定。
 - 真机：MI 8 实测选图回锁、系统录音机、生物识别弹窗、位置详情地图；加密/备份等以设备冒烟为准。
 
-## 标签：预置 + 用户自定义（2026-10-10：已编码 + 编译 + 单测 + 设备测试，未打 release）
+## 标签：预置 + 用户自定义（1.5 起发布）
 
 印迹变多后时间线全量平铺会乱，本次加入**标签分类 + 时间线按标签筛选**，并允许用户自建标签。
 
@@ -55,7 +55,7 @@ app/src/main/java/com/beyondguo/imprints/
 
 ### 预置标签与自定义
 
-- **预置标签**：个人经历 / 国家大事 / 互联网热点 / 工作 / 旅行。**允许改名**（用户可见文案），但 id 不变、身份仍是预置、**不可删除**（`TagCatalog.isPreset` 保护，因为库层面没有 `preset` 之外的标记）。
+- **预置标签**：家事 / 国事 / 天下事（`TagCatalog.PRESETS`，id 仍是 `personal` / `national` / `internet`）。**允许改名**（用户可见文案），但 id 不变、身份仍是预置、**不可删除**（`TagCatalog.isPreset` 保护，因为库层面没有 `preset` 之外的标记）。旧预置「工作 / 旅行」自 1.5 起**停用**（`archived = 1`，见 `MIGRATION_4_5`），不再出现在选择与筛选里。
 - **自定义标签**：编辑页/时间线点「+ 新建」输入名称；设置页「标签管理」可改名、删除、查看使用数。
 - **重名复用**：名称已存在（忽略首尾空白、大小写、全半角 NFKC）时不新建，直接返回已有标签并选中——用户在编辑页想建一个已存在的标签，期望的是「用上它」而不是报错。
 - **命名规则**（`data/TagRules.kt`）：去首尾空白、连续空白压成一个空格；**最多 20 个字**（按 Unicode 码点算，emoji 不会被算成两个）；**最多 50 个标签**（不含已停用）。
@@ -64,7 +64,7 @@ app/src/main/java/com/beyondguo/imprints/
 ### 挂载与筛选
 
 - **一条印迹挂 0~N 个标签**：`tags` + `entry_tags` 两张表；`EntryDraft.tagIds` / `EntryDetail.tagIds` 承载；保存时按展示顺序归一化（丢弃库内不存在的 id、去重、预置在前自定义在后）。外键 CASCADE，删印迹自动清关联，不留孤儿行。
-- **时间线筛选**：标题下方一行标签 chip，可多选叠加（**OR 语义**），再点取消；全部未选 = 显示全部。筛选在内存里做（条目数有限），没有新增 DAO 查询。
+- **时间线筛选**：标题下方**固定单行**标签 chip，横向滚动；**行内只放内置标签**（家事 / 国事 / 天下事），首位「全部」（未选任何标签时高亮，点它即清空筛选），末尾「更多」打开完整标签面板（搜索、使用数、新建、改名、删除）。可多选叠加（**OR 语义**），再点取消。已选中的自定义标签会临时留在行内，方便点掉。筛选在内存里做（条目数有限），没有新增 DAO 查询。
 - **筛选联动**：月份吸顶、时间穿梭（月份/日期绿点）、搜索回跳定位都以**筛选结果**为准；筛选无结果时用独立空态文案，不误报「还没有印迹」。筛选状态由 `ImprintsApp` 持有，进出详情/编辑后保留。
 - **管理入口**：编辑页与时间线的标签区都支持**长按已选标签**改名/删除；设置页 →「标签管理」列出全部标签与使用数，可改名、删除、新建。
 - **详情页**：只读展示已挂标签，名称按库内查询（自定义标签名不写在代码里）。
@@ -72,7 +72,7 @@ app/src/main/java/com/beyondguo/imprints/
 ### 备份与数据库
 
 - **备份**：metadata 增加 `tags` / `entryTags`；`preset` / `createdAtMs` 一并导出。导入端 `optJSONArray` 兜底，**旧备份（无这些字段/数组）仍可导入**；标签按 id 合并，本机已有 id 不被覆盖，外部超长名称截断到 20 字而不是丢弃关联。
-- **数据库迁移**：`version = 4`，新增 `MIGRATION_3_4`（`tags` 加 `preset` / `createdAtMs`，按 id 把 5 个预置标签回填为 `preset = 1`），schema 导出到 `app/schemas/…/4.json`。
+- **数据库迁移**：`version = 5`。`MIGRATION_3_4`（`tags` 加 `preset` / `createdAtMs`，按 id 把当时的 5 个预置标签回填为 `preset = 1`）；`MIGRATION_4_5`（预置「工作 / 旅行」置 `archived = 1` 停用），schema 导出到 `app/schemas/…/4.json`、`5.json`。
 - **建库路径**：全新安装不跑 Migration，靠 `SEED_TAGS_ON_CREATE` 种预置标签——这条路径曾漏掉，导致新装用户编辑页标签区整段消失。
 
 ### 测试
@@ -86,7 +86,7 @@ app/src/main/java/com/beyondguo/imprints/
 
 ### 仍未验证
 
-- 升级到真机旧库后的**肉眼回归**：自动化迁移测试已覆盖 Room 结构校验与旧数据留存，但真机上此前的 v3 数据已被清掉（安装前 `databases/` 即为空），所以**没有在真机现有旧数据上走过一次 v3→v4**。
+- 升级到真机旧库后的**肉眼回归**：自动化迁移测试已覆盖 Room 结构校验与旧数据留存，但真机上此前的旧数据已被清掉（安装前 `databases/` 即为空），所以**没有在真机现有旧数据上走过一次真实升级**（当前库为 v5）。
 - 自定义标签相关交互的**视觉验收截图**（新建对话框、长按菜单、标签管理页）。
 
 ## 历史：固定标签版（2026-10-10，`9de1560`，数据库 v3）
@@ -95,6 +95,20 @@ app/src/main/java/com/beyondguo/imprints/
 - `MIGRATION_2_3` 与 `3.json` 保留在仓库里，供 v2/v3 老库升级使用。
 
 ## Release 历史
+
+### Release 1.5（2026-10-16）
+
+- `versionName=1.5`，`versionCode=6`
+- **标签：预置 + 用户自定义**：标签从写死在代码里变成库内用户数据，可新建、改名、删除（预置不可删）；一条印迹可挂 0~N 个标签；名称最多 20 字、库内最多 50 个
+- **时间线按标签筛选**：固定单行横滚 chip，首位「全部」（点它清空筛选）；行内只放内置标签，自定义标签收进「更多」；「更多」打开完整标签面板（搜索 / 使用数 / 新建 / 改名 / 删除）；多选为 **OR 叠加**
+- **内置标签收敛**：家事 / 国事 / 天下事（原「个人经历 / 国家大事 / 互联网热点」只改展示名，id 不变）；「工作 / 旅行」**停用**（`MIGRATION_4_5`，数据库 **version 5**）
+- 编辑页：标签条目行移到「所在位置」下方；未选文案改为「添加标签」
+- 工具：新增设备测试数据播种脚本（官网截图用）
+- R8：`mapping.txt` → `app/build/outputs/mapping/release/`（**必备份**）
+- 构建：`.\gradlew.bat :app:assembleRelease` → `app/build/outputs/apk/release/app-release.apk`（约 77MB）
+- 包名：`com.beyondguo.imprints`；Release SHA1 与 1.2/1.3/1.4 相同（keystore 未变）  
+  `7E:39:92:0D:8E:C5:14:95:4B:70:72:4A:78:48:64:0D:49:9D:E8:BB`
+- GitHub：`https://github.com/beyondgjc/Imprints_android/releases/tag/v1.5`
 
 ### Release 1.4（2026-10-07）
 
