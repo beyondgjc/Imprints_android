@@ -21,12 +21,16 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.LocationOn
@@ -626,10 +630,21 @@ internal fun EventTimePickerSheet(
         containerColor = Color.White,
         shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
     ) {
+        // 内容（日历 + 滚轮）在小屏/大字体下会超过弹层高度：内容区可滚动，
+        // 操作行固定在弹层底部，保证「取消 / 确定」永远完整可见，不被屏幕下缘裁掉。
         Column(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            Modifier
+                .fillMaxWidth()
+                .heightIn(max = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp * 0.88f)
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp),
         ) {
+            Column(
+                Modifier
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
             Text(title ?: stringResource(R.string.editor_pick_date), color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Text(subtitle ?: stringResource(R.string.editor_pick_date_sub), color = Quiet, fontSize = 13.sp)
 
@@ -721,8 +736,13 @@ internal fun EventTimePickerSheet(
             Text(stringResource(R.string.editor_time_hint), color = Quiet, fontSize = 12.sp,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 modifier = Modifier.fillMaxWidth())
+            }
 
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 if (showBackToToday) TextButton(onClick = {
                     val now = LocalDateTime.now()
                     date = now.toLocalDate(); hour = now.hour; minute = now.minute
