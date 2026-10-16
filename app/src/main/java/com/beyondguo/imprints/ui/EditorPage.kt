@@ -624,18 +624,24 @@ internal fun EventTimePickerSheet(
     var viewYear by remember(initial) { mutableStateOf(initial.year) }
     var viewMonth by remember(initial) { mutableStateOf(initial.monthValue) }
 
+    // 尺寸按屏高比例取值（带上下限），不写死到某一台设备：
+    // 小屏/大字体时只有日历区滚动，滚轮 + 提示 + 操作行始终完整可见。
+    val screenHeight = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp
+    val sectionSpacing = (screenHeight * 0.012f).coerceIn(6.dp, 12.dp)
+    val calendarCellHeight = (screenHeight * 0.043f).coerceIn(26.dp, 38.dp)
+    val wheelHeight = (screenHeight * 0.15f).coerceIn(84.dp, 128.dp)
+    val wheelItemHeight = (wheelHeight / 3f).coerceAtLeast(28.dp)
+
     androidx.compose.material3.ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = Color.White,
         shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
     ) {
-        // 内容（日历 + 滚轮）在小屏/大字体下会超过弹层高度：内容区可滚动，
-        // 操作行固定在弹层底部，保证「取消 / 确定」永远完整可见，不被屏幕下缘裁掉。
         Column(
             Modifier
                 .fillMaxWidth()
-                .heightIn(max = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp * 0.93f)
+                .heightIn(max = screenHeight * 0.93f)
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp),
         ) {
@@ -643,7 +649,7 @@ internal fun EventTimePickerSheet(
                 Modifier
                     .weight(1f, fill = false)
                     .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(sectionSpacing),
             ) {
             Text(title ?: stringResource(R.string.editor_pick_date), color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Text(subtitle ?: stringResource(R.string.editor_pick_date_sub), color = Quiet, fontSize = 13.sp)
@@ -682,12 +688,12 @@ internal fun EventTimePickerSheet(
                     Row(Modifier.fillMaxWidth()) {
                         repeat(7) { col ->
                             val cellIndex = it * 7 + col
-                            Box(Modifier.weight(1f).height(36.dp), contentAlignment = Alignment.Center) {
+                            Box(Modifier.weight(1f).heightIn(min = calendarCellHeight), contentAlignment = Alignment.Center) {
                                 if (cellIndex >= startOffset && dayNumber <= daysInMonth) {
                                     val d = dayNumber
                                     val selected = date.year == viewYear && date.monthValue == viewMonth && date.dayOfMonth == d
                                     Box(
-                                        Modifier.size(36.dp)
+                                        Modifier.size(calendarCellHeight)
                                             .clip(RoundedCornerShape(50))
                                             .background(if (selected) Green else Color.Transparent)
                                             .clickable { date = LocalDate.of(viewYear, viewMonth, d) },
@@ -710,10 +716,11 @@ internal fun EventTimePickerSheet(
                 stringResource(R.string.editor_date_selected, date.year, date.monthValue, date.dayOfMonth),
                 color = Ink, fontSize = 14.sp,
             )
+            }
 
-            // 上下滑动选择时分（滚轮）：整体高度按一屏内放得下设计（日历+滚轮+操作行同屏可见）
+            // 时分滚轮 + 提示 + 操作行固定在弹层下部：任何屏高/字体下都完整可见
             Row(
-                Modifier.fillMaxWidth().height(124.dp),
+                Modifier.fillMaxWidth().height(wheelHeight),
                 horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -723,6 +730,7 @@ internal fun EventTimePickerSheet(
                     label = { "%02d".format(it) },
                     onSelected = { hour = it },
                     modifier = Modifier.width(72.dp),
+                    itemHeight = wheelItemHeight,
                 )
                 Text(":", color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                 WheelPicker(
@@ -731,12 +739,12 @@ internal fun EventTimePickerSheet(
                     label = { "%02d".format(it) },
                     onSelected = { minute = it },
                     modifier = Modifier.width(72.dp),
+                    itemHeight = wheelItemHeight,
                 )
             }
             Text(stringResource(R.string.editor_time_hint), color = Quiet, fontSize = 12.sp,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                modifier = Modifier.fillMaxWidth())
-            }
+                modifier = Modifier.fillMaxWidth().padding(top = 2.dp))
 
             Row(
                 Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 16.dp),
