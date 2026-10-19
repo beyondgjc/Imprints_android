@@ -48,6 +48,10 @@ object LetterRules {
     fun quickDeliverMinute(base: LocalDate, months: Long, hour: Int = 9): String =
         LocalDateTime.of(quickDeliverDate(base, months), java.time.LocalTime.of(hour, 0)).format(MINUTE_FORMAT)
 
+    /** 「一周后」：按天数推，同样落在上午 9:00。 */
+    fun quickDeliverMinuteWeeks(base: LocalDate, weeks: Long, hour: Int = 9): String =
+        LocalDateTime.of(base.plusWeeks(weeks), java.time.LocalTime.of(hour, 0)).format(MINUTE_FORMAT)
+
     /** 送达时间解析结果。[instantMs] 为封存后固定的送达瞬间。 */
     data class DeliverResolution(val instantMs: Long, val zoneId: String, val ambiguousResolved: Boolean)
 

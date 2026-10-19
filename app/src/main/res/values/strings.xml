@@ -366,6 +366,7 @@
     <string name="letter_sealed">已封存</string>
     <string name="letter_deliver_row">送达时间</string>
     <string name="letter_deliver_pick">选择送达时间</string>
+    <string name="letter_quick_week">一周后</string>
     <string name="letter_quick_month">一个月后</string>
     <string name="letter_quick_year">一年后</string>
     <string name="letter_quick_custom">自选</string>

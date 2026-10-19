@@ -602,8 +602,8 @@ fun LetterEditorPage(
     val singlePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) prepareUris(listOf(uri))
     }
-    val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) scope.launch {
+    fun prepareAudioUri(uri: Uri) {
+        scope.launch {
             runCatching { repository.files.prepare(uri, audio = true) }.onSuccess { prepared ->
                 runCatching { repository.commitAttachment(prepared, sessionOwnerId) }
                     .onSuccess { a ->
@@ -612,6 +612,35 @@ fun LetterEditorPage(
                     }
                     .onFailure { error -> repository.files.discard(prepared); report(error) }
             }.onFailure(report)
+        }
+    }
+    val audioPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) prepareAudioUri(uri)
+    }
+    // 与印迹编辑器一致：文件 / 系统录音机（不自建录音 UI）
+    var showAudioSourceSheet by remember { mutableStateOf(false) }
+    val errPickRecordedAudio = stringResource(R.string.err_pick_recorded_audio)
+    val errNoRecorder = stringResource(R.string.err_no_recorder)
+    val systemRecorderLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val uri = result.data?.data
+        when {
+            uri != null -> prepareAudioUri(uri)
+            // 录音机多不回传 URI：引导到文件选择器挑刚录的那条
+            else -> {
+                android.widget.Toast.makeText(context, errPickRecordedAudio, android.widget.Toast.LENGTH_SHORT).show()
+                audioPicker.launch(arrayOf("audio/*"))
+            }
+        }
+    }
+
+    fun launchSystemRecorder() {
+        // 与 MediaStore.Audio.Media.RECORD_SOUND_ACTION 同值；字符串避免依赖该常量
+        val recordIntent = Intent("android.provider.MediaStore.RECORD_SOUND")
+        if (recordIntent.resolveActivity(context.packageManager) != null) {
+            systemRecorderLauncher.launch(recordIntent)
+        } else {
+            android.widget.Toast.makeText(context, errNoRecorder, android.widget.Toast.LENGTH_SHORT).show()
+            audioPicker.launch(arrayOf("audio/*"))
         }
     }
     val notifyPermissionLauncher =
@@ -769,7 +798,7 @@ fun LetterEditorPage(
                         title = stringResource(R.string.editor_audio_title),
                         subtitle = null,
                         titleColor = Quiet,
-                        onClick = { audioPicker.launch(arrayOf("audio/*")) },
+                        onClick = { showAudioSourceSheet = true },
                         trailing = EditorMetaTrailing.Chevron,
                     )
                     else -> EditorAudioSelectedRow(
@@ -780,7 +809,7 @@ fun LetterEditorPage(
                             audio = null
                             if (removed != null) scope.launch { repository.releaseAttachment(sessionOwnerId, removed) }
                         },
-                        onReplace = { audioPicker.launch(arrayOf("audio/*")) },
+                        onReplace = { showAudioSourceSheet = true },
                     )
                 }
             }
@@ -794,25 +823,27 @@ fun LetterEditorPage(
                     trailing = EditorMetaTrailing.Chevron,
                 )
             }
-            // 快捷时间（ML-01/ML-16）：一个月后 / 一年后取上午 9:00，目标日不存在取月末；可再改
+            // 快捷时间（ML-01/ML-16）：一周后 / 一个月后 / 一年后取上午 9:00，目标日不存在取月末；可再改
             item {
-                Row(
+                androidx.compose.foundation.layout.FlowRow(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    TagChip(
+                        text = stringResource(R.string.letter_quick_week),
+                        selected = false,
+                        onClick = { deliverMinute = LetterRules.quickDeliverMinuteWeeks(LocalDate.now(), 1) },
+                    )
                     TagChip(
                         text = stringResource(R.string.letter_quick_month),
                         selected = false,
-                        onClick = {
-                            deliverMinute = LetterRules.quickDeliverMinute(LocalDate.now(), 1)
-                        },
+                        onClick = { deliverMinute = LetterRules.quickDeliverMinute(LocalDate.now(), 1) },
                     )
                     TagChip(
                         text = stringResource(R.string.letter_quick_year),
                         selected = false,
-                        onClick = {
-                            deliverMinute = LetterRules.quickDeliverMinute(LocalDate.now(), 12)
-                        },
+                        onClick = { deliverMinute = LetterRules.quickDeliverMinute(LocalDate.now(), 12) },
                     )
                     TagChip(
                         text = stringResource(R.string.letter_quick_custom),
@@ -848,11 +879,12 @@ fun LetterEditorPage(
 
     if (showDeliverPicker) {
         EventTimePickerSheet(
-            initial = runCatching { LocalDateTime.parse(deliverMinute, MINUTE_FORMAT) }
-                .getOrDefault(LocalDateTime.now().plusMonths(1).withHour(9).withMinute(0)),
+            // 未选过时定位到「现在」，不是一个月后：用户自己决定往后推多久
+            initial = runCatching { LocalDateTime.parse(deliverMinute, MINUTE_FORMAT) }.getOrDefault(LocalDateTime.now()),
             title = stringResource(R.string.letter_deliver_pick),
-            subtitle = stringResource(R.string.letter_quick_month) + " / " + stringResource(R.string.letter_quick_year),
+            subtitle = null,
             showBackToToday = false,
+            showQuickJumps = true,
             onConfirm = { picked ->
                 deliverMinute = picked.format(MINUTE_FORMAT)
                 showDeliverPicker = false
@@ -861,17 +893,24 @@ fun LetterEditorPage(
         )
     }
 
+    // 与印迹编辑器一致：添加声音可选「文件 / 系统录音机」
+    if (showAudioSourceSheet) AudioSourceSheet(
+        onPickFile = {
+            showAudioSourceSheet = false
+            audioPicker.launch(arrayOf("audio/*"))
+        },
+        onRecord = {
+            showAudioSourceSheet = false
+            launchSystemRecorder()
+        },
+        onRemove = null,
+        onDismiss = { showAudioSourceSheet = false },
+    )
+
     if (showSealConfirm) AlertDialog(
         onDismissRequest = { showSealConfirm = false },
         title = { Text(stringResource(R.string.letter_seal_confirm_title)) },
-        text = {
-            Text(
-                stringResource(
-                    R.string.letter_seal_confirm_message,
-                    if (letterId == null) formatMinute(deliverMinute) else formatMinute(deliverMinute),
-                ),
-            )
-        },
+        text = { Text(stringResource(R.string.letter_seal_confirm_message, formatMinute(deliverMinute))) },
         confirmButton = { TextButton(onClick = ::doSeal) { Text(stringResource(R.string.letter_seal)) } },
         dismissButton = { TextButton(onClick = { showSealConfirm = false }) { Text(stringResource(R.string.action_cancel)) } },
     )

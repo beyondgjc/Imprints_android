@@ -527,10 +527,10 @@ fun EditorPage(
     }
 }
 
-/** 音频来源：从文件 / 系统录音机（不自建录音 UI） */
+/** 音频来源：从文件 / 系统录音机（不自建录音 UI）。印迹与信件编辑器共用。 */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-private fun AudioSourceSheet(
+internal fun AudioSourceSheet(
     onPickFile: () -> Unit,
     onRecord: () -> Unit,
     onRemove: (() -> Unit)?,
@@ -617,6 +617,8 @@ internal fun EventTimePickerSheet(
     title: String? = null,
     subtitle: String? = null,
     showBackToToday: Boolean = true,
+    /** 写信的送达时间：用「一周后 / 一个月后 / 一年后」三个可点击快捷项替换副标题 */
+    showQuickJumps: Boolean = false,
 ) {
     var date by remember(initial) { mutableStateOf(initial.toLocalDate()) }
     var hour by remember(initial) { mutableStateOf(initial.hour) }
@@ -652,7 +654,33 @@ internal fun EventTimePickerSheet(
                 verticalArrangement = Arrangement.spacedBy(sectionSpacing),
             ) {
             Text(title ?: stringResource(R.string.editor_pick_date), color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            Text(subtitle ?: stringResource(R.string.editor_pick_date_sub), color = Quiet, fontSize = 13.sp)
+            if (showQuickJumps) {
+                // 快捷跳转：点击把日历跳到对应日期（时分保持不变，可继续微调）
+                fun jumpTo(target: java.time.LocalDate) {
+                    date = target
+                    viewYear = target.year
+                    viewMonth = target.monthValue
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TagChip(
+                        text = stringResource(R.string.letter_quick_week),
+                        selected = false,
+                        onClick = { jumpTo(java.time.LocalDate.now().plusWeeks(1)) },
+                    )
+                    TagChip(
+                        text = stringResource(R.string.letter_quick_month),
+                        selected = false,
+                        onClick = { jumpTo(java.time.LocalDate.now().plusMonths(1)) },
+                    )
+                    TagChip(
+                        text = stringResource(R.string.letter_quick_year),
+                        selected = false,
+                        onClick = { jumpTo(java.time.LocalDate.now().plusYears(1)) },
+                    )
+                }
+            } else {
+                Text(subtitle ?: stringResource(R.string.editor_pick_date_sub), color = Quiet, fontSize = 13.sp)
+            }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = {
@@ -795,24 +823,36 @@ private fun WheelPicker(
         initialFirstVisibleItemIndex = firstForValue(selected),
     )
     val fling = rememberSnapFlingBehavior(listState)
+    // 吸附停稳后 firstVisibleItemScrollOffset 可能不是 0（实测常停在近一格处），
+    // 因此「中心行」必须由 index + offset 共同决定：容器中心在 1.5 个格子处，
+    // offset < 半格时落在第 2 行，否则第 3 行。只取 index + 1 会整体偏一行（选 20 得 19）。
+    val itemHeightPx = with(androidx.compose.ui.platform.LocalDensity.current) { itemHeight.toPx() }
+    fun centerVirtualIndex(first: Int, offset: Int): Int =
+        WheelPickerMath.centerIndex(first, offset, itemHeightPx)
+
     // 中心项的虚拟下标 → 显示用
-    val centerVirtual = listState.firstVisibleItemIndex + 1
+    val centerVirtual = centerVirtualIndex(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
     val centerValue = valueOf(centerVirtual)
 
     LaunchedEffect(listState, count) {
-        var lastReported = valueOf(listState.firstVisibleItemIndex + 1)
-        androidx.compose.runtime.snapshotFlow { listState.firstVisibleItemIndex }
-            .collect { first ->
+        var lastReported = valueOf(
+            centerVirtualIndex(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset),
+        )
+        androidx.compose.runtime.snapshotFlow {
+            listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+        }
+            .collect { (first, offset) ->
+                val center = centerVirtualIndex(first, offset)
                 // 靠近两端时回中（同一 value，不闪）
                 if (first < count * 3 || first > virtualCount - count * 4) {
-                    val v = valueOf(first + 1)
+                    val v = valueOf(center)
                     val target = firstForValue(v)
                     if (target != first) {
                         listState.scrollToItem(target)
                         return@collect
                     }
                 }
-                val v = valueOf(first + 1)
+                val v = valueOf(center)
                 if (v != lastReported) {
                     lastReported = v
                     onSelected(v)
@@ -820,9 +860,24 @@ private fun WheelPicker(
             }
     }
 
+    // 停稳后把选中的行对齐到高亮格（offset = 0），避免高亮格被两行平分、视觉与取值错位
+    LaunchedEffect(listState) {
+        androidx.compose.runtime.snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
+            if (!scrolling) {
+                val offset = listState.firstVisibleItemScrollOffset
+                if (offset != 0) {
+                    val center = centerVirtualIndex(listState.firstVisibleItemIndex, offset)
+                    listState.animateScrollToItem(center - 1)
+                }
+            }
+        }
+    }
+
     // 外部改 selected（如「回到今天」）时对齐；滚动过程中 current==selected 则不跳
     LaunchedEffect(selected) {
-        val current = valueOf(listState.firstVisibleItemIndex + 1)
+        val current = valueOf(
+            centerVirtualIndex(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset),
+        )
         if (current != selected) listState.scrollToItem(firstForValue(selected))
     }
 
