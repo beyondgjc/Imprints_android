@@ -1,0 +1,53 @@
+package com.beyondguo.imprints.mail
+
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
+
+/**
+ * 后台运行策略（ML-06/ML-09）。
+ *
+ * 数据库是事实来源，但「到点提醒」依赖系统把 AlarmManager 广播送到我们进程：
+ * 进程被杀（划掉后台、厂商清理）后，若应用还处在系统的电池优化/受限名单里，
+ * 部分 ROM（实测 MIUI 12：`Restricted packages` + `standby bucket = RARE`）会**直接丢弃精确闹钟**，
+ * 表现就是「到期没有通知，直到再次打开应用才对账补发」。
+ *
+ * 因此引导用户把本应用加入「忽略电池优化」白名单，是送达提醒可靠性的前提条件。
+ */
+object LetterBackgroundPolicy {
+    /** 是否已豁免电池优化（可直接查系统状态，无需额外权限）。 */
+    fun isExempt(context: Context): Boolean {
+        val power = context.getSystemService(PowerManager::class.java) ?: return true
+        return power.isIgnoringBatteryOptimizations(context.packageName)
+    }
+
+    /**
+     * 请求豁免：优先弹系统的「允许后台运行」对话框；
+     * 没有对应页面时退回到电池优化列表，让用户手动把印迹设为「不优化」。
+     */
+    fun requestExemption(context: Context) {
+        val direct = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+            .setData(Uri.parse("package:${context.packageName}"))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val fallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val opened = runCatching {
+            context.startActivity(direct)
+            true
+        }.getOrDefault(false)
+        if (!opened) runCatching { context.startActivity(fallback) }
+    }
+
+    /** 打开本应用的通知设置（含厂商的「通知过滤规则」）。 */
+    fun openNotificationSettings(context: Context) {
+        runCatching {
+            context.startActivity(
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+    }
+}

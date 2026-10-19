@@ -879,6 +879,16 @@ fun LetterEditorPage(
                         if (notifyEnabled && !LetterScheduler.canScheduleExact(context)) {
                             Text(stringResource(R.string.letter_exact_off), color = Quiet, fontSize = 12.sp)
                         }
+                        // 进程被清理后还能不能提醒，取决于电池优化白名单（MIUI 未豁免会丢弃精确闹钟）
+                        if (notifyEnabled && !com.beyondguo.imprints.mail.LetterBackgroundPolicy.isExempt(context)) {
+                            Text(
+                                stringResource(R.string.letter_background_hint),
+                                Modifier.clickable {
+                                    com.beyondguo.imprints.mail.LetterBackgroundPolicy.requestExemption(context)
+                                },
+                                color = Green, fontSize = 12.sp,
+                            )
+                        }
                     }
                     Switch(
                         checked = notifyEnabled,

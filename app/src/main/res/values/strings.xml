@@ -283,6 +283,9 @@
     <string name="section_reminder">提醒</string>
     <string name="settings_notification">通知设置</string>
     <string name="settings_notification_sub">系统通知与通知过滤（小米需设为「全部设为重要」）</string>
+    <string name="settings_background">后台提醒</string>
+    <string name="settings_background_on">已允许后台运行，进程被清理后仍能送达提醒</string>
+    <string name="settings_background_off">未允许后台运行：应用被清理后可能收不到送达提醒，点此设置</string>
     <string name="section_about">关于</string>
     <string name="action_import">导入</string>
     <string name="media_kind_video">视频</string>
@@ -388,6 +391,7 @@
     <string name="letter_notify_permission_off">到期会在首页置顶，系统通知未开启</string>
     <string name="letter_notify_permission_settings">去开启通知</string>
     <string name="letter_exact_off">普通提醒，后台通知可能延迟</string>
+    <string name="letter_background_hint">后台运行受限，应用被清理后可能收不到提醒 · 去设置</string>
     <string name="letter_exact_request">开启精确提醒</string>
     <string name="letter_time_ambiguous">该时间在时区切换日重复，已按较早时间送达</string>
     <string name="letter_time_missing">该时间在所选时区不存在，请重新选择</string>

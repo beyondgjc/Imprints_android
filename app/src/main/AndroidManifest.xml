@@ -16,6 +16,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- 精确提醒（Android 12+ 需用户在「闹钟和提醒」里授权；未授权退化为普通提醒） -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- 送达提醒可靠性：引导用户把本应用加入「忽略电池优化」白名单。
+         实测 MIUI 把未豁免应用列为 Restricted + RARE 后会丢弃精确闹钟，进程被杀就收不到提醒。 -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <queries>
         <intent>
             <action android:name="android.provider.MediaStore.RECORD_SOUND" />

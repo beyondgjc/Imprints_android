@@ -174,6 +174,14 @@ class MainActivity : FragmentActivity() {
             "imprints-cleanup", ExistingPeriodicWorkPolicy.KEEP,
             PeriodicWorkRequestBuilder<com.beyondguo.imprints.data.CleanupWorker>(1, TimeUnit.DAYS).build(),
         )
+        // 送达对账兜底：闹钟被 ROM/系统清理丢掉时，最多 15 分钟（WorkManager 最小周期）补一次到期状态与通知。
+        // 注意：用户「强行停止」应用后系统会取消全部任务并禁止唤醒，直到再次打开应用（平台行为，无法绕过）。
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "imprints-letter-maintenance", ExistingPeriodicWorkPolicy.KEEP,
+            PeriodicWorkRequestBuilder<com.beyondguo.imprints.mail.LetterScheduler.LetterDueWorker>(15, TimeUnit.MINUTES)
+                .setInitialDelay(15, TimeUnit.MINUTES)
+                .build(),
+        )
     }
 
     override fun onNewIntent(intent: Intent) {
