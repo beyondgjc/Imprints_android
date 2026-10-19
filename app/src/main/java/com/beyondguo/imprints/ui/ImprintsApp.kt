@@ -1225,6 +1225,28 @@ private fun SettingsPage(
             }
         }
 
+        item { SettingsSectionLabel(stringResource(R.string.section_reminder)) }
+        item {
+            SettingsGroup {
+                SettingsRow(
+                    title = stringResource(R.string.settings_notification),
+                    subtitle = stringResource(R.string.settings_notification_sub),
+                    onClick = {
+                        // 跳到系统通知设置。国产 ROM（尤其 MIUI）的「通知过滤规则」若为「系统推荐」，
+                        // 会把本应用的通知静默折叠/丢弃（logcat: notification blocked by assistant request），
+                        // 需要用户改成「全部设为重要」。
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                    .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        }
+                    },
+                )
+            }
+        }
+
         item { SettingsSectionLabel(stringResource(R.string.section_data)) }
         item {
             SettingsGroup {

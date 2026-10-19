@@ -27,10 +27,17 @@ import com.beyondguo.imprints.security.ImprintSecurity
  * 清除通知不修改信件状态；前台正在阅读该信时不再发该信通知。
  */
 object LetterNotifier {
-    const val CHANNEL_ID = "mail_delivery"
+    /**
+     * 渠道 id 带版本：Android 渠道属性创建后**不可修改**。
+     * v1（`mail_delivery`）被误设成静音（`setSound(null)`）导致「开了到时通知却没声音」，
+     * 只能换新 id 重建，并删除旧渠道。
+     */
+    const val CHANNEL_ID = "mail_delivery_v2"
+    private const val LEGACY_CHANNEL_ID = "mail_delivery"
     const val EXTRA_LETTER_ID = "com.beyondguo.imprints.extra.LETTER_ID"
     private const val SUMMARY_ID = 4200
     private const val ID_BASE = 4300
+    private const val TAG = "ImprintsMail"
 
     /** 前台正在阅读的信件 id：此时不再发该信通知。 */
     @Volatile
@@ -41,16 +48,20 @@ object LetterNotifier {
 
     fun ensureChannel(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        // 旧静音渠道已废弃：删掉，避免设置页出现一个永远不出声的「时光邮箱」
+        if (manager.getNotificationChannel(LEGACY_CHANNEL_ID) != null) {
+            manager.deleteNotificationChannel(LEGACY_CHANNEL_ID)
+        }
         if (manager.getNotificationChannel(CHANNEL_ID) != null) return
+        // 普通可听提醒：系统默认提示音 + 默认重要级（有声、不横幅、可清除）；
+        // 不用全屏通知、闹钟式持续响铃或不可清除通知。最终声音/横幅仍受用户渠道设置影响。
         val channel = NotificationChannel(
             CHANNEL_ID,
             context.getString(R.string.mail_channel_name),
             NotificationManager.IMPORTANCE_DEFAULT,
         ).apply {
             description = context.getString(R.string.mail_channel_desc)
-            // 普通可听提醒：不用全屏通知、闹钟式持续响铃或不可清除通知
-            setSound(null, null)
-            enableVibration(false)
+            enableVibration(true)
         }
         manager.createNotificationChannel(channel)
     }
@@ -88,8 +99,11 @@ object LetterNotifier {
             val events = mailDao.notificationEvents(letter.entryId)
             events.none { it.scheduleRevision == letter.scheduleRevision && it.postedAtMs != null }
         }
+        android.util.Log.i(TAG, "notifyDue due=${letters.size} pending=${pending.size}")
         if (pending.isEmpty()) return
-        if (!canPost(context)) {
+        val canPostNow = canPost(context)
+        android.util.Log.i(TAG, "notifyDue canPost=$canPostNow enabled=${NotificationManagerCompat.from(context).areNotificationsEnabled()}")
+        if (!canPostNow) {
             pending.forEach { record(mailDao, it.entryId, it.scheduleRevision, posted = false, suppressed = "NO_PERMISSION") }
             return
         }
@@ -104,6 +118,7 @@ object LetterNotifier {
                         .setContentIntent(contentIntent(context, letter.entryId))
                         .build(),
                 )
+                android.util.Log.i(TAG, "notifyDue posted single id=${notificationIdFor(letter.entryId)}")
                 record(mailDao, letter.entryId, letter.scheduleRevision, posted = true)
             } else {
                 val tap = PendingIntent.getActivity(
@@ -120,17 +135,24 @@ object LetterNotifier {
                         .setContentIntent(tap)
                         .build(),
                 )
+                android.util.Log.i(TAG, "notifyDue posted summary count=${pending.size}")
                 pending.forEach { record(mailDao, it.entryId, it.scheduleRevision, posted = true) }
             }
         } catch (error: SecurityException) {
+            android.util.Log.e(TAG, "notifyDue security exception", error)
             pending.forEach { record(mailDao, it.entryId, it.scheduleRevision, posted = false, suppressed = "NO_PERMISSION") }
+        } catch (error: Exception) {
+            // 之前这里只捕获 SecurityException，其它异常被外层 runCatching 吞掉，表现为「静默无通知」
+            android.util.Log.e(TAG, "notifyDue failed", error)
+            pending.forEach { record(mailDao, it.entryId, it.scheduleRevision, posted = false, suppressed = "POST_FAILED") }
         }
     }
 
     /** 通用文案：不含标题、正文、附件、地点。 */
     private fun baseBuilder(context: Context): NotificationCompat.Builder =
         NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            // 单色 silhouette 图标；不要用 app 的 launcher 图标（自适应图标会被部分 ROM 丢弃通知）
+            .setSmallIcon(R.drawable.ic_stat_mail)
             .setContentTitle(context.getString(R.string.mail_notify_title))
             .setContentText(context.getString(R.string.mail_notify_text))
             .setAutoCancel(true)

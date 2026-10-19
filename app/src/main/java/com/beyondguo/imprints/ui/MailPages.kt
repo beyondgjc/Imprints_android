@@ -95,13 +95,14 @@ private fun formatMinute(minute: String): String {
 @Composable
 private fun formatDateOnly(minute: String): String {
     val ldt = runCatching { LocalDateTime.parse(minute, MINUTE_FORMAT) }.getOrNull() ?: return minute.take(10)
-    return stringResource(R.string.editor_date_selected, ldt.year, ldt.monthValue, ldt.dayOfMonth)
+    // 展示用纯日期：不能复用选择器里的「已选：」文案，否则列表会显示「写于 已选：…」
+    return stringResource(R.string.format_date_ymd, ldt.year, ldt.monthValue, ldt.dayOfMonth)
 }
 
 @Composable
 private fun formatEpochDate(ms: Long): String {
     val date = LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(ms), ZoneId.systemDefault())
-    return stringResource(R.string.editor_date_selected, date.year, date.monthValue, date.dayOfMonth)
+    return stringResource(R.string.format_date_ymd, date.year, date.monthValue, date.dayOfMonth)
 }
 
 /** 封面送达文案：临近一天显示「明天送达」，其余显示明确日期（日期是主信息）。 */
@@ -137,6 +138,8 @@ fun MailHomePage(
     val sealed by repository.sealedLetters.collectAsState(initial = emptyList())
     val drafts by repository.letterDrafts.collectAsState(initial = emptyList())
     var showUnreadOnly by remember { mutableStateOf(false) }
+    // 待送达 / 已送达 两个分组：点标签切换，默认看「待送达」
+    var showDeliveredTab by remember { mutableStateOf(false) }
     val delivered = sealed.filter { LetterRules.isDue(it.toEntity(), nowMs) }
         .sortedWith(compareByDescending<LetterListRow> { it.deliverAtMs }.thenByDescending { it.entryId })
     val waiting = sealed.filter { !LetterRules.isDue(it.toEntity(), nowMs) }
@@ -169,16 +172,16 @@ fun MailHomePage(
         ) {
             TagChip(
                 text = stringResource(R.string.mail_tab_pending) + " " + waiting.size,
-                selected = true,
-                onClick = { },
+                selected = !showDeliveredTab,
+                onClick = { showDeliveredTab = false },
             )
             TagChip(
                 text = stringResource(R.string.mail_tab_delivered) + " " + delivered.size,
-                selected = false,
-                onClick = { },
+                selected = showDeliveredTab,
+                onClick = { showDeliveredTab = true },
             )
             Spacer(Modifier.weight(1f))
-            if (delivered.any { it.deliveryReadAtMs == null }) {
+            if (showDeliveredTab && delivered.any { it.deliveryReadAtMs == null }) {
                 TagChip(
                     text = stringResource(R.string.mail_unread_only),
                     selected = showUnreadOnly,
@@ -187,29 +190,39 @@ fun MailHomePage(
             }
         }
 
+        val visible = if (showDeliveredTab) {
+            delivered.filter { !showUnreadOnly || it.deliveryReadAtMs == null }
+        } else {
+            waiting
+        }
         LazyColumn(
             Modifier.fillMaxSize().padding(horizontal = 22.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(bottom = 32.dp),
         ) {
-            if (waiting.isEmpty() && delivered.isEmpty()) {
+            if (visible.isEmpty()) {
                 item {
                     Column(
                         Modifier.fillMaxWidth().padding(top = 48.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Text(stringResource(R.string.mail_empty_pending), color = Ink, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
-                        Text(stringResource(R.string.mail_empty_pending_sub), color = Quiet, fontSize = 14.sp)
-                        Spacer(Modifier.height(8.dp))
-                        Button(onClick = onWrite, shape = RoundedCornerShape(12.dp)) { Text(stringResource(R.string.mail_write)) }
+                        Text(
+                            stringResource(if (showDeliveredTab) R.string.mail_empty_delivered else R.string.mail_empty_pending),
+                            color = Ink, fontSize = 21.sp, fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            stringResource(if (showDeliveredTab) R.string.mail_empty_delivered_sub else R.string.mail_empty_pending_sub),
+                            color = Quiet, fontSize = 14.sp,
+                        )
+                        if (!showDeliveredTab) {
+                            Spacer(Modifier.height(8.dp))
+                            Button(onClick = onWrite, shape = RoundedCornerShape(12.dp)) { Text(stringResource(R.string.mail_write)) }
+                        }
                     }
                 }
             }
-            items(waiting, key = { "w-" + it.entryId }) { row ->
-                LetterCard(row = row, nowMs = nowMs, onClick = { onOpenEnvelope(row.entryId) })
-            }
-            items(delivered.filter { !showUnreadOnly || it.deliveryReadAtMs == null }, key = { "d-" + it.entryId }) { row ->
+            items(visible, key = { (if (showDeliveredTab) "d-" else "w-") + it.entryId }) { row ->
                 LetterCard(row = row, nowMs = nowMs, onClick = { onOpenEnvelope(row.entryId) })
             }
         }

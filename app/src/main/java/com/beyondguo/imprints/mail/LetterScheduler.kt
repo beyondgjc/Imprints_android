@@ -141,10 +141,14 @@ object LetterScheduler {
         letters.refreshDeliveryState(now)
         // 未到期信：撤销旧任务后按当前版本重新注册
         mailDao.upcomingLetters(now).forEach { schedule(context, it) }
-        // 已到期/已删除信：撤销残留任务
+        // 只撤销「已读 / 已删除」的残留任务与通知。
+        // 注意：**不能**把「已送达」当作撤通知的条件——送达时闹钟刚发出通知，
+        // 紧接着的 WorkManager 补偿任务会跑 reconcile，会把通知立刻撤掉（用户表现为"没有通知"）。
         mailDao.allLetters().forEach { letter ->
             val entry = database.dao().entry(letter.entryId)
-            if (entry?.deletedAtMs != null || letter.deliveredAtMs != null) {
+            val gone = entry == null || entry.deletedAtMs != null
+            val read = letter.deliveryReadAtMs != null
+            if (gone || read) {
                 cancel(context, letter.entryId, letter.scheduleRevision)
             }
         }

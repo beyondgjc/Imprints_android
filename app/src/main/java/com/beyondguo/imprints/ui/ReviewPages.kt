@@ -255,14 +255,14 @@ private fun resolveRange(kind: String, shift: Int, today: LocalDate): DateRange 
 
 @Composable
 private fun rangeLabel(range: DateRange): String = stringResource(
-    R.string.editor_date_selected, range.start.year, range.start.monthValue, range.start.dayOfMonth,
+    R.string.format_date_ymd, range.start.year, range.start.monthValue, range.start.dayOfMonth,
 ) + " ~ " + stringResource(R.string.format_date_md, range.endInclusive.monthValue, range.endInclusive.dayOfMonth)
 
 @Composable
 private fun rangeLabelOf(review: ReviewEntity): String {
     val start = runCatching { LocalDate.parse(review.startLocalDate) }.getOrNull() ?: return review.startLocalDate
     val end = runCatching { LocalDate.parse(review.endLocalDateInclusive) }.getOrNull() ?: return review.endLocalDateInclusive
-    return stringResource(R.string.editor_date_selected, start.year, start.monthValue, start.dayOfMonth) +
+    return stringResource(R.string.format_date_ymd, start.year, start.monthValue, start.dayOfMonth) +
         " ~ " + stringResource(R.string.format_date_md, end.monthValue, end.dayOfMonth)
 }
 
@@ -597,7 +597,7 @@ fun ReviewWizardPage(
 @Composable
 private fun formatLetterDate(row: LetterListRow): String {
     val date = java.time.LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(row.createdAtMs), java.time.ZoneId.systemDefault())
-    return stringResource(R.string.editor_date_selected, date.year, date.monthValue, date.dayOfMonth)
+    return stringResource(R.string.format_date_ymd, date.year, date.monthValue, date.dayOfMonth)
 }
 
 @Composable

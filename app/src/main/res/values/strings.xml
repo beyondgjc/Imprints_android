@@ -187,6 +187,7 @@
     <string name="bio_title_app_enable">开启应用锁生物识别</string>
     <string name="bio_title_app_unlock">解锁印迹</string>
     <string name="format_date_md">%1$d月%2$d日</string>
+    <string name="format_date_ymd">%1$d年%2$d月%3$d日</string>
     <string name="format_datetime_ymd_hm">%1$d年%2$d月%3$d日 %4$02d:%5$02d</string>
     <string name="format_date_md_weekday">%1$d月%2$d日 · %3$s</string>
     <string name="format_ymd_weekday">%1$d年%2$d月%3$d日 · %4$s</string>
@@ -279,6 +280,9 @@
     <string name="action_unlock">解锁</string>
     <string name="action_save">保存</string>
     <string name="section_data">数据</string>
+    <string name="section_reminder">提醒</string>
+    <string name="settings_notification">通知设置</string>
+    <string name="settings_notification_sub">系统通知与通知过滤（小米需设为「全部设为重要」）</string>
     <string name="section_about">关于</string>
     <string name="action_import">导入</string>
     <string name="media_kind_video">视频</string>
@@ -367,7 +371,7 @@
     <string name="letter_deliver_row">送达时间</string>
     <string name="letter_deliver_pick">选择送达时间</string>
     <string name="letter_quick_week">一周后</string>
-    <string name="letter_quick_month">一个月后</string>
+    <string name="letter_quick_month">一月后</string>
     <string name="letter_quick_year">一年后</string>
     <string name="letter_quick_custom">自选</string>
     <string name="letter_notify_row">到时通知</string>
