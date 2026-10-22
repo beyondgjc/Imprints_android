@@ -142,7 +142,7 @@ private enum class MailTab { DELIVERED, DRAFTS }
 fun MailHomePage(
     repository: LetterRepository,
     nowMs: Long,
-    onOpenEnvelope: (String) -> Unit,
+    onOpenLetter: (entryId: String, read: Boolean) -> Unit,
     onWrite: () -> Unit,
     onOpenDraft: (String) -> Unit,
     onDeleteDraft: (String) -> Unit,
@@ -152,6 +152,7 @@ fun MailHomePage(
     val drafts by repository.standaloneDrafts.collectAsState(initial = emptyList())
     var tab by rememberSaveable { mutableStateOf(MailTab.DELIVERED) }
     var showUnreadOnly by rememberSaveable { mutableStateOf(false) }
+    var pendingDraftDelete by remember { mutableStateOf<ContentDraftEntity?>(null) }
     // 两组各自保留滚动位置：切标签再切回来不跳回顶部
     val deliveredListState = rememberLazyListState()
     val draftsListState = rememberLazyListState()
@@ -161,6 +162,17 @@ fun MailHomePage(
             .sortedWith(compareByDescending<LetterListRow> { it.deliverAtMs }.thenByDescending { it.entryId })
     }
     val unreadCount = delivered.count { it.deliveryReadAtMs == null }
+    // 「只看未读」在未读清零后必须自动失效：那一刻 chip 本身也会隐藏，
+    // 用户没有别的方式关掉筛选，否则会卡在一个永远空的列表里。
+    val filteringUnread = showUnreadOnly && unreadCount > 0
+    LaunchedEffect(unreadCount) {
+        if (unreadCount == 0) showUnreadOnly = false
+    }
+
+    // 草稿清空后自动回到「已送达」，避免停在一个已经不存在的标签上
+    LaunchedEffect(drafts.isEmpty()) {
+        if (drafts.isEmpty() && tab == MailTab.DRAFTS) tab = MailTab.DELIVERED
+    }
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -181,11 +193,14 @@ fun MailHomePage(
                 selected = tab == MailTab.DELIVERED,
                 onClick = { tab = MailTab.DELIVERED },
             )
-            TagChip(
-                text = stringResource(R.string.mail_tab_drafts) + " " + drafts.size,
-                selected = tab == MailTab.DRAFTS,
-                onClick = { tab = MailTab.DRAFTS },
-            )
+            // 没有草稿时不显示「草稿箱」标签
+            if (drafts.isNotEmpty()) {
+                TagChip(
+                    text = stringResource(R.string.mail_tab_drafts) + " " + drafts.size,
+                    selected = tab == MailTab.DRAFTS,
+                    onClick = { tab = MailTab.DRAFTS },
+                )
+            }
             Spacer(Modifier.weight(1f))
             // 只看未读只对「已送达」有意义
             if (tab == MailTab.DELIVERED && unreadCount > 0) {
@@ -198,7 +213,7 @@ fun MailHomePage(
         }
 
         if (tab == MailTab.DELIVERED) {
-            val visible = if (showUnreadOnly) delivered.filter { it.deliveryReadAtMs == null } else delivered
+            val visible = if (filteringUnread) delivered.filter { it.deliveryReadAtMs == null } else delivered
             LazyColumn(
                 Modifier.fillMaxSize().padding(horizontal = 22.dp),
                 state = deliveredListState,
@@ -215,7 +230,10 @@ fun MailHomePage(
                     }
                 }
                 items(visible, key = { it.entryId }) { row ->
-                    LetterCard(row = row, nowMs = nowMs, onClick = { onOpenEnvelope(row.entryId) })
+                    LetterCard(row = row, nowMs = nowMs, onClick = {
+                        // 已读直达正文；未读先经过信封页，由用户主动拆开
+                        onOpenLetter(row.entryId, row.deliveryReadAtMs != null)
+                    })
                 }
             }
         } else {
@@ -235,10 +253,28 @@ fun MailHomePage(
                     }
                 }
                 items(drafts, key = { it.id }) { draft ->
-                    DraftRow(draft = draft, onOpen = { onOpenDraft(draft.id) }, onDelete = { onDeleteDraft(draft.id) })
+                    DraftRow(draft = draft, onOpen = { onOpenDraft(draft.id) }, onDelete = { pendingDraftDelete = draft })
                 }
             }
         }
+    }
+
+    // V0.2：草稿删除是直接删除（不进回收站），所以必须先确认；取消时草稿与编辑内容都不动
+    pendingDraftDelete?.let { draft ->
+        AlertDialog(
+            onDismissRequest = { pendingDraftDelete = null },
+            title = { Text(stringResource(R.string.mail_draft_delete_title)) },
+            text = { Text(stringResource(R.string.mail_draft_delete_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingDraftDelete = null
+                    onDeleteDraft(draft.id)
+                }) { Text(stringResource(R.string.action_delete_draft), color = Danger) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDraftDelete = null }) { Text(stringResource(R.string.action_cancel)) }
+            },
+        )
     }
 }
 
@@ -311,24 +347,21 @@ private fun LetterCard(row: LetterListRow, nowMs: Long, onClick: () -> Unit) {
 
 // ---------- 信封详情 ----------
 
+/**
+ * 信封页：只负责「拆开这封信」。
+ *
+ * V0.2 调整（beyondguo 2026-10-22 指定）：封存/未拆阶段不放删除入口 —— 想删请先拆开，
+ * 在正文页底部删除。这样「未拆」这个状态只跟"读信"有关，不夹带管理动作。
+ */
 @Composable
 fun LetterEnvelopePage(
     repository: LetterRepository,
     letterId: String,
     nowMs: Long,
     onOpenBody: () -> Unit,
-    onEdit: () -> Unit,
-    onDeleted: () -> Unit,
-    onRescheduled: () -> Unit,
-    report: (Throwable) -> Unit,
 ) {
-    val scope = rememberCoroutineScope()
-    val context = LocalContext.current.applicationContext
     var row by remember(letterId) { mutableStateOf<LetterListRow?>(null) }
     var entity by remember(letterId) { mutableStateOf<com.beyondguo.imprints.data.FutureLetterEntity?>(null) }
-    var confirmPeek by remember { mutableStateOf(false) }
-    var confirmDelete by remember { mutableStateOf(false) }
-    var showReschedule by remember { mutableStateOf(false) }
 
     LaunchedEffect(letterId, nowMs) {
         row = repository.letterRow(letterId)
@@ -341,7 +374,21 @@ fun LetterEnvelopePage(
         Text(stringResource(R.string.state_loading), Modifier.padding(20.dp))
         return
     }
+
+    // V0.2：信封页只服务「已到期、未进回收站」的信。
+    // 未到期却进到这里（旧通知、旧路由、直接 ID、进程恢复）一律不提供读正文的入口，
+    // 也不显示改期或编辑 —— 改期只在设置 →「管理封存信件」里做。
     val due = LetterRules.isDue(letter, nowMs)
+    if (!due || current.deletedAtMs != null) {
+        Column(
+            Modifier.fillMaxSize().padding(horizontal = 22.dp, vertical = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(stringResource(R.string.envelope_not_due), color = Ink, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.envelope_not_due_sub), color = Quiet, fontSize = 13.sp, lineHeight = 19.sp)
+        }
+        return
+    }
 
     Column(
         Modifier.fillMaxSize().padding(horizontal = 22.dp, vertical = 16.dp),
@@ -351,90 +398,19 @@ fun LetterEnvelopePage(
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(stringResource(R.string.envelope_written, formatEpochDate(current.createdAtMs)), color = Quiet, fontSize = 13.sp)
             Text(stringResource(R.string.envelope_deliver, formatMinute(letter.deliverLocalMinute)), color = Quiet, fontSize = 13.sp)
-            letter.deliveredAtMs?.let { Text(stringResource(R.string.envelope_delivered_at, formatEpochDate(it)), color = Quiet, fontSize = 13.sp) }
-            letter.firstOpenedAtMs?.let { Text(stringResource(R.string.envelope_first_opened, formatEpochDate(it)), color = Quiet, fontSize = 13.sp) }
-            letter.deliveryReadAtMs?.let { Text(stringResource(R.string.envelope_first_read, formatEpochDate(it)), color = Quiet, fontSize = 13.sp) }
-        }
-
-        if (!due) Text(stringResource(R.string.envelope_reseal_edit_hint), color = Quiet, fontSize = 12.sp)
-
-        Button(
-            onClick = {
-                if (due) {
-                    scope.launch { runCatching { repository.markEnvelopeOpened(letterId) } }
-                    onOpenBody()
-                } else confirmPeek = true
-            },
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (due) stringResource(R.string.envelope_open) else stringResource(R.string.envelope_peek)) }
-
-        if (!due) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton2(stringResource(R.string.envelope_reschedule)) { showReschedule = true }
-                OutlinedButton2(stringResource(R.string.action_edit)) {
-                    scope.launch {
-                        runCatching { repository.markEnvelopeOpened(letterId) }
-                        onEdit()
-                    }
-                }
-                OutlinedButton2(stringResource(R.string.envelope_delete), danger = true) { confirmDelete = true }
+            // 已到期才可能有实际送达时间；不再展示「首次打开」这类 V0.2 已废止的维度
+            letter.deliveredAtMs?.let {
+                Text(stringResource(R.string.envelope_delivered_at, formatEpochDate(it)), color = Quiet, fontSize = 13.sp)
             }
         }
+
+        Button(
+            // 拆信动作本身不写已读：已读只在正文成功展示后由正文页持久化
+            onClick = onOpenBody,
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text(stringResource(R.string.envelope_open)) }
     }
-
-    if (confirmPeek) AlertDialog(
-        onDismissRequest = { confirmPeek = false },
-        title = { Text(stringResource(R.string.envelope_peek_confirm_title)) },
-        text = { Text(stringResource(R.string.envelope_peek_confirm_message)) },
-        confirmButton = {
-            TextButton(onClick = {
-                confirmPeek = false
-                scope.launch { runCatching { repository.markEnvelopeOpened(letterId) } }
-                onOpenBody()
-            }) { Text(stringResource(R.string.envelope_peek)) }
-        },
-        dismissButton = { TextButton(onClick = { confirmPeek = false }) { Text(stringResource(R.string.action_cancel)) } },
-    )
-
-    if (showReschedule) {
-        EventTimePickerSheet(
-            initial = runCatching { LocalDateTime.parse(letter.deliverLocalMinute, MINUTE_FORMAT) }.getOrDefault(LocalDateTime.now().plusDays(1)),
-            title = stringResource(R.string.envelope_reschedule),
-            subtitle = stringResource(R.string.letter_deliver_pick),
-            showBackToToday = false,
-            onConfirm = { picked ->
-                showReschedule = false
-                scope.launch {
-                    runCatching {
-                        repository.reschedule(letterId, picked.format(MINUTE_FORMAT), ZoneId.systemDefault().id)
-                    }.onSuccess {
-                        repository.letter(letterId)?.let { LetterScheduler.schedule(context, it) }
-                        onRescheduled()
-                    }.onFailure(report)
-                }
-            },
-            onDismiss = { showReschedule = false },
-        )
-    }
-
-    if (confirmDelete) AlertDialog(
-        onDismissRequest = { confirmDelete = false },
-        title = { Text(stringResource(R.string.envelope_delete)) },
-        text = { Text(stringResource(R.string.letter_delete_message)) },
-        confirmButton = {
-            TextButton(onClick = {
-                confirmDelete = false
-                scope.launch {
-                    runCatching {
-                        repository.moveToRecycle(letterId)
-                        LetterScheduler.cancel(context, letterId, letter.scheduleRevision)
-                    }.onSuccess { onDeleted() }.onFailure(report)
-                }
-            }) { Text(stringResource(R.string.action_delete)) }
-        },
-        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.action_cancel)) } },
-    )
 }
 
 @Composable
@@ -459,6 +435,7 @@ fun LetterBodyPage(
     val context = LocalContext.current
     var detail by remember(letterId) { mutableStateOf<com.beyondguo.imprints.data.LetterDetail?>(null) }
     var loadError by remember(letterId) { mutableStateOf<Throwable?>(null) }
+    var confirmDelete by remember { mutableStateOf(false) }
 
     LaunchedEffect(letterId, nowMs) {
         val loaded = runCatching { repository.letterDetail(letterId) }
@@ -469,7 +446,7 @@ fun LetterBodyPage(
             // 正文成功显示才算到期已读；加载失败不标已读
             LetterNotifier.foregroundLetterId = letterId
             runCatching {
-                repository.markEnvelopeOpened(letterId)
+                // V0.2 不再记录「提前打开」；正文成功展示后才记为到期已读
                 if (LetterRules.isDue(value.letter, System.currentTimeMillis())) {
                     repository.markDeliveryRead(letterId)
                     LetterNotifier.cancel(context, letterId)
@@ -532,7 +509,31 @@ fun LetterBodyPage(
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(stringResource(R.string.letter_add_to_review)) }
         }
+        // 已读信从邮箱直达正文、不再经过信封页，删除入口必须留在这里
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                OutlinedButton2(stringResource(R.string.envelope_delete), danger = true) { confirmDelete = true }
+            }
+        }
     }
+
+    if (confirmDelete) AlertDialog(
+        onDismissRequest = { confirmDelete = false },
+        title = { Text(stringResource(R.string.envelope_delete)) },
+        text = { Text(stringResource(R.string.letter_delete_message)) },
+        confirmButton = {
+            TextButton(onClick = {
+                confirmDelete = false
+                scope.launch {
+                    runCatching {
+                        repository.moveToRecycle(letterId)
+                        LetterScheduler.cancel(context, letterId, current.letter.scheduleRevision)
+                    }.onSuccess { onBack() }.onFailure(report)
+                }
+            }) { Text(stringResource(R.string.action_move_to_recycle)) }
+        },
+        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.action_cancel)) } },
+    )
 }
 
 @Composable
@@ -545,7 +546,6 @@ private fun isoMinuteOfEntry(createdAtMs: Long): String =
 fun LetterEditorPage(
     repository: LetterRepository,
     draftId: String?,
-    letterId: String?,
     prefillBody: String = "",
     onSealed: (String) -> Unit,
     onCancel: () -> Unit,
@@ -553,15 +553,15 @@ fun LetterEditorPage(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val sessionOwnerId = remember(draftId, letterId) { draftId ?: UUID.randomUUID().toString() }
+    val sessionOwnerId = remember(draftId) { draftId ?: UUID.randomUUID().toString() }
 
-    var title by remember(draftId, letterId) { mutableStateOf("") }
-    var body by remember(draftId, letterId) { mutableStateOf(prefillBody) }
-    val mediaChoices: SnapshotStateList<MediaChoice> = remember(draftId, letterId) { mutableStateListOf() }
-    var audio by remember(draftId, letterId) { mutableStateOf<LetterAttachment?>(null) }
-    var deliverMinute by remember(draftId, letterId) { mutableStateOf("") }
-    var notifyEnabled by remember(draftId, letterId) { mutableStateOf(true) }
-    var loading by remember(draftId, letterId) { mutableStateOf(draftId != null || letterId != null) }
+    var title by remember(draftId) { mutableStateOf("") }
+    var body by remember(draftId) { mutableStateOf(prefillBody) }
+    val mediaChoices: SnapshotStateList<MediaChoice> = remember(draftId) { mutableStateListOf() }
+    var audio by remember(draftId) { mutableStateOf<LetterAttachment?>(null) }
+    var deliverMinute by remember(draftId) { mutableStateOf("") }
+    var notifyEnabled by remember(draftId) { mutableStateOf(true) }
+    var loading by remember(draftId) { mutableStateOf(draftId != null) }
     var saving by remember { mutableStateOf(false) }
     var showExitDialog by remember { mutableStateOf(false) }
     var showSealConfirm by remember { mutableStateOf(false) }
@@ -589,8 +589,8 @@ fun LetterEditorPage(
     }
 
     fun currentDraft() = LetterDraft(
-        draftId = if (letterId == null) sessionOwnerId else null,
-        id = letterId,
+        draftId = sessionOwnerId,
+        id = null,
         title = title,
         body = body,
         visuals = mediaChoices.map(::attachmentOf),
@@ -600,7 +600,7 @@ fun LetterEditorPage(
         notifyEnabled = notifyEnabled,
     )
 
-    LaunchedEffect(draftId, letterId) {
+    LaunchedEffect(draftId) {
         if (draftId != null) {
             val draft = repository.draft(draftId)
             if (draft != null) {
@@ -611,19 +611,6 @@ fun LetterEditorPage(
                 mediaChoices.clear()
                 mediaChoices.addAll(draft.visuals.map(::toChoice))
                 audio = draft.audio
-            }
-        } else if (letterId != null) {
-            val detail = repository.letterDetail(letterId)
-            if (detail != null) {
-                title = detail.letter.title
-                body = detail.entry.body
-                deliverMinute = detail.letter.deliverLocalMinute
-                notifyEnabled = detail.letter.notifyEnabled
-                mediaChoices.clear()
-                mediaChoices.addAll(detail.visuals.map { v ->
-                    toChoice(LetterAttachment(v.relativePath, v.kind, v.mime, v.byteLength, v.sha256, v.motionVideoPath, v.motionVideoSha256, v.motionVideoByteLength))
-                })
-                audio = detail.audio?.let { LetterAttachment(it.relativePath, "AUDIO", it.mime, it.byteLength, it.sha256) }
             }
         }
         loading = false
@@ -719,17 +706,16 @@ fun LetterEditorPage(
             report(IllegalStateException(context.getString(R.string.letter_body_required)))
             return
         }
-        if (draft.deliverLocalMinute.isBlank() && letterId == null) {
+        if (draft.deliverLocalMinute.isBlank()) {
             report(IllegalStateException(context.getString(R.string.letter_deliver_required)))
             return
         }
-        if (letterId == null) {
-            val resolution = runCatching { LetterRules.resolveDeliver(draft.deliverLocalMinute, draft.deliverZoneId) }
-            resolution.exceptionOrNull()?.let { report(it); return }
-            if (resolution.getOrThrow().instantMs <= System.currentTimeMillis()) {
-                report(IllegalStateException(context.getString(R.string.letter_deliver_future)))
-                return
-            }
+        // 只有新建一种情况：送达时间必须晚于当前时刻（封存后正文冻结，没有「保留原计划」分支）
+        val resolution = runCatching { LetterRules.resolveDeliver(draft.deliverLocalMinute, draft.deliverZoneId) }
+        resolution.exceptionOrNull()?.let { report(it); return }
+        if (resolution.getOrThrow().instantMs <= System.currentTimeMillis()) {
+            report(IllegalStateException(context.getString(R.string.letter_deliver_future)))
+            return
         }
         showSealConfirm = true
     }
@@ -783,7 +769,7 @@ fun LetterEditorPage(
                 Text(stringResource(R.string.action_cancel), color = Ink, fontSize = 16.sp)
             }
             Text(
-                if (letterId == null) stringResource(R.string.letter_new_title) else stringResource(R.string.letter_edit_title),
+                stringResource(R.string.letter_new_title),
                 Modifier.align(Alignment.Center),
                 color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold,
             )

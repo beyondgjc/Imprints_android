@@ -353,10 +353,15 @@
     <string name="mail_empty_delivered_sub">到期的信会出现在这里，等待你拆开</string>
     <string name="mail_empty_drafts">还没有草稿</string>
     <string name="mail_empty_drafts_sub">写到一半的信，可以留在这里慢慢完成</string>
+    <string name="mail_draft_delete_title">删除这篇草稿？</string>
+    <string name="mail_draft_delete_message">正文和仅由它使用的附件将被删除，无法从回收站恢复。</string>
+    <string name="action_delete_draft">删除草稿</string>
     <string name="mail_unread_only">只看未读</string>
     <string name="a11y_mail_unread">未读</string>
     <string name="a11y_mail_read">已读</string>
     <string name="mail_manage_sealed">管理封存信件</string>
+    <string name="mail_type_sealed">封存信件</string>
+    <string name="recycle_letter_recover_first">恢复后才能查看这封信</string>
     <string name="mail_manage_sealed_sub">改期或删除；不影响已送达的信</string>
     <string name="mail_manage_sealed_intro">这里只显示日期。封存后不能提前阅读，也不能修改正文。</string>
     <string name="mail_manage_sealed_empty">没有未到期的封存信件</string>
@@ -376,9 +381,8 @@
     <string name="mail_state_read">已读</string>
     <string name="mail_type_letter">信件</string>
 
-    <!-- 写信编辑器 -->
+    <!-- 写信编辑器（V0.2 起只支持新建；封存后正文冻结，不再有编辑模式） -->
     <string name="letter_new_title">给未来写信</string>
-    <string name="letter_edit_title">编辑信件</string>
     <string name="letter_title_hint">标题（可不填）</string>
     <string name="letter_body_hint">写给未来的自己…</string>
     <string name="letter_seal">封存</string>
@@ -411,18 +415,15 @@
     <!-- 信封 / 拆信 -->
     <string name="envelope_title">信封</string>
     <string name="envelope_open">拆开这封信</string>
-    <string name="envelope_peek">提前查看</string>
-    <string name="envelope_peek_confirm_title">提前查看</string>
-    <string name="envelope_peek_confirm_message">提前查看不会取消原定送达。</string>
-    <string name="envelope_reschedule">改期</string>
     <string name="envelope_delete">删除</string>
     <string name="envelope_written">写于 %1$s</string>
     <string name="envelope_deliver">约定送达 %1$s</string>
     <string name="envelope_delivered_at">送达于 %1$s</string>
+    <string name="envelope_not_due">这封信还没有送达</string>
+    <string name="envelope_not_due_sub">到约定的时间后，它会出现在时光邮箱里。</string>
     <string name="envelope_first_read">首次到期阅读 %1$s</string>
-    <string name="envelope_first_opened">首次打开 %1$s</string>
-    <string name="envelope_reseal_edit_hint">编辑正文或附件需先确认提前查看</string>
-    <string name="letter_delete_message">删除后这封信会移入回收站，保留 7 天，期间可以恢复。</string>
+    <string name="letter_delete_message">将这封信移入回收站？7 天内可以恢复。</string>
+    <string name="action_move_to_recycle">移入回收站</string>
     <string name="letter_target_missing">这封信已移入回收站或已不存在</string>
     <string name="action_record_imprint">记录印迹</string>
     <string name="letter_body_title">信件正文</string>

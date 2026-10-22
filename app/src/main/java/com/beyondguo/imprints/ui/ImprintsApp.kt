@@ -21,9 +21,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -41,9 +43,13 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MailOutline
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.Email
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Star
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -116,6 +122,9 @@ fun ImprintsApp(
     revealEpoch: Int,
     pendingLetterTarget: String? = null,
     onLetterTargetConsumed: () -> Unit = {},
+    /** 聚合通知点击：没有具体信件，直接进时光邮箱列表 */
+    pendingOpenMail: Boolean = false,
+    onOpenMailConsumed: () -> Unit = {},
     unlockApp: suspend (String) -> Boolean,
     refreshLockState: suspend () -> Unit,
     requestBiometric: (String, () -> Unit, () -> Unit) -> Unit,
@@ -155,6 +164,7 @@ fun ImprintsApp(
     // 用 context.resources 而非 context.getString，避免在 lambda 里查资源触发 lint 警告。
     val importDone: (Int) -> String = { n -> context.resources.getString(R.string.import_done, n) }
     val recycleMoved = stringResource(R.string.recycle_moved)
+    val recycleLetterHint = stringResource(R.string.recycle_letter_recover_first)
     val deleteDone = stringResource(R.string.delete_done)
     val bioFeelingEnabled = stringResource(R.string.bio_feeling_enabled)
     val bioFeelingFailed = stringResource(R.string.bio_feeling_failed)
@@ -248,15 +258,35 @@ fun ImprintsApp(
         }.getOrNull()
     }
     // 通知点击进入：通过隐私同意与应用锁后才消费目标，且只带 ID 不带内容
+    LaunchedEffect(pendingOpenMail, locked, initialized) {
+        if (!pendingOpenMail) return@LaunchedEffect
+        if (!initialized || locked) return@LaunchedEffect
+        onOpenMailConsumed()
+        page = Page.Mail
+    }
     LaunchedEffect(pendingLetterTarget, locked, initialized) {
         val target = pendingLetterTarget ?: return@LaunchedEffect
         if (!initialized || locked) return@LaunchedEffect
+        // 先把所有 suspend 查询做完，最后才消费目标。
+        // 原因：消费会改掉本 effect 的 key，协程随即重启/取消，
+        // 任何在其后的挂起点都回不来，page 就设不上（「点通知只进首页」的根因）。
+        val kind = repository.contentKind(target)
+        val read = if (kind == com.beyondguo.imprints.data.ContentKind.LETTER) {
+            letterRepository.letter(target)?.deliveryReadAtMs != null
+        } else false
         onLetterTargetConsumed()
-        when (repository.contentKind(target)) {
-            com.beyondguo.imprints.data.ContentKind.LETTER -> page = Page.LetterEnvelope(target)
+        when (kind) {
+            com.beyondguo.imprints.data.ContentKind.LETTER -> {
+                // V02-07：统一按 deliveryReadAtMs 分流，已读不再经过信封页
+                page = if (read) Page.LetterBody(target) else Page.LetterEnvelope(target)
+            }
             com.beyondguo.imprints.data.ContentKind.ENTRY -> page = Page.Detail(target)
             com.beyondguo.imprints.data.ContentKind.REVIEW -> page = Page.ReviewDetail(target)
-            null -> scope.launch { snackbar.showSnackbar(letterTargetMissing) }
+            null -> {
+                // 目标已不存在：落到时光邮箱，而不是停在首页什么也不说
+                scope.launch { snackbar.showSnackbar(letterTargetMissing) }
+                page = Page.Mail
+            }
         }
     }
     var feelingMode by remember { mutableStateOf("OFF") }
@@ -399,38 +429,64 @@ fun ImprintsApp(
         bottomBar = {
             // 底部顺序固定「印迹 · 回顾 · 时光邮箱」；二级页隐藏底部导航
             if (topLevelPage && !locked) NavigationBar(containerColor = MaterialTheme.colorScheme.background) {
+                // 选中态必须显式给色：默认走 Material3 的 onSecondaryContainer（深灰），
+                // 看起来就是「填充变黑」。这里统一用应用内的 Green。
+                val navColors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = Green,
+                    selectedTextColor = Green,
+                    unselectedIconColor = Quiet,
+                    unselectedTextColor = Quiet,
+                    // 微信 / QQ 的选中态只有「图标和文字变绿」，没有胶囊底色
+                    indicatorColor = Color.Transparent,
+                )
                 NavigationBarItem(
                     selected = page == Page.Timeline,
                     onClick = { page = Page.Timeline },
-                    icon = { Icon(Icons.Default.Home, stringResource(R.string.nav_imprints)) },
+                    colors = navColors,
+                    icon = {
+                        // 未选中线框中空、选中填充（对齐微信 / QQ 底栏的做法）
+                        Icon(
+                            if (page == Page.Timeline) Icons.Default.Home else Icons.Outlined.Home,
+                            stringResource(R.string.nav_imprints),
+                        )
+                    },
                     label = { Text(stringResource(R.string.nav_imprints)) },
                 )
                 NavigationBarItem(
                     selected = page == Page.Review,
                     onClick = { page = Page.Review },
-                    icon = { Icon(Icons.Default.Star, stringResource(R.string.nav_review)) },
+                    colors = navColors,
+                    icon = {
+                        Icon(
+                            if (page == Page.Review) Icons.Default.Star else Icons.Outlined.Star,
+                            stringResource(R.string.nav_review),
+                        )
+                    },
                     label = { Text(stringResource(R.string.nav_review)) },
                 )
                 NavigationBarItem(
                     selected = page == Page.Mail,
                     onClick = { page = Page.Mail },
+                    colors = navColors,
                     icon = {
-                        // 到期未读徽标：应用锁遮挡期间不显示内容和数量（locked 时整条底栏不渲染）
-                        Box {
-                            Icon(Icons.Default.MailOutline, stringResource(R.string.nav_mail))
-                            if (unreadLetters > 0) Box(
-                                Modifier
-                                    .align(androidx.compose.ui.Alignment.TopEnd)
-                                    .padding(start = 8.dp)
-                                    .size(15.dp)
-                                    .background(Danger, androidx.compose.foundation.shape.CircleShape),
-                                contentAlignment = androidx.compose.ui.Alignment.Center,
-                            ) {
-                                Text(
-                                    if (unreadLetters > 9) "9+" else unreadLetters.toString(),
-                                    color = Color.White, fontSize = 9.sp,
-                                )
-                            }
+                        // 到期未读徽标：应用锁遮挡期间不显示内容和数量（locked 时整条底栏不渲染）。
+                        // 用 BadgedBox 让徽标悬浮在图标右上角（对齐微信/QQ），不再压在图标上。
+                        BadgedBox(
+                            badge = {
+                                if (unreadLetters > 0) {
+                                    Badge(containerColor = Danger, contentColor = Color.White) {
+                                        Text(
+                                            if (unreadLetters > 9) "9+" else unreadLetters.toString(),
+                                            fontSize = 10.sp,
+                                        )
+                                    }
+                                }
+                            },
+                        ) {
+                            Icon(
+                                if (page == Page.Mail) Icons.Default.Email else Icons.Outlined.Email,
+                                stringResource(R.string.nav_mail),
+                            )
                         }
                     },
                     label = { Text(stringResource(R.string.nav_mail)) },
@@ -536,7 +592,10 @@ fun ImprintsApp(
                     MailHomePage(
                         repository = letterRepository,
                         nowMs = nowMs,
-                        onOpenEnvelope = { page = Page.LetterEnvelope(it) },
+                        onOpenLetter = { id, read ->
+                            // 统一按 deliveryReadAtMs 分流：已读不再经过信封页与拆信动作
+                            page = if (read) Page.LetterBody(id) else Page.LetterEnvelope(id)
+                        },
                         onWrite = { page = Page.LetterEditor(null, null) },
                         onOpenDraft = { id -> page = Page.LetterEditor(id, null) },
                         onDeleteDraft = { id -> scope.launch { runCatching { letterRepository.deleteDraft(id) }.onFailure(::report) } },
@@ -615,17 +674,20 @@ fun ImprintsApp(
                         recycled.map {
                             RecycleItem("ENTRY", it.id, it.body, it.deletedAtMs ?: 0L)
                         } + recycledLetters.map {
-                            RecycleItem("LETTER", it.entryId, it.title, it.deletedAtMs ?: 0L)
+                            // V0.2：未到期的封存信在回收站也不暴露标题（规格 ML-08）
+                            val sealedNotDue = it.deliveredAtMs == null && it.deliverAtMs > nowMs
+                            RecycleItem("LETTER", it.entryId, if (sealedNotDue) "" else it.title, it.deletedAtMs ?: 0L)
                         } + recycledReviews.map {
                             RecycleItem("REVIEW", it.id, it.title, it.deletedAtMs ?: 0L)
                         }
                     }
                     RecyclePage(recycleItems,
                         onOpen = { item ->
-                            page = when (item.kind) {
-                                "LETTER" -> Page.LetterBody(item.id)
-                                "REVIEW" -> Page.ReviewDetail(item.id)
-                                else -> Page.RecycleDetail(item.id)
+                            when (item.kind) {
+                                // V0.2：回收站里的信件不提供正文预览，须先恢复再走正常拆信流程
+                                "LETTER" -> scope.launch { snackbar.showSnackbar(recycleLetterHint) }
+                                "REVIEW" -> page = Page.ReviewDetail(item.id)
+                                else -> page = Page.RecycleDetail(item.id)
                             }
                         },
                         onRestore = { item ->
@@ -745,28 +807,19 @@ fun ImprintsApp(
                     letterId = current.id,
                     nowMs = nowMs,
                     onOpenBody = { page = Page.LetterBody(current.id) },
-                    onEdit = { page = Page.LetterEditor(null, current.id) },
-                    onDeleted = {
-                        scope.launch { snackbar.showSnackbar(recycleMoved) }
-                        page = Page.Mail
-                    },
-                    onRescheduled = {
-                        scope.launch { runCatching { com.beyondguo.imprints.mail.LetterScheduler.reconcile(context) } }
-                    },
-                    report = ::report,
                 )
                 is Page.LetterBody -> LetterBodyPage(
                     repository = letterRepository,
                     letterId = current.id,
                     nowMs = nowMs,
-                    onBack = { page = Page.LetterEnvelope(current.id) },
+                    // V0.2：拆开后的返回栈不保留可回退的信封页，返回直接回邮箱
+                    onBack = { page = Page.Mail },
                     onAddToReview = { addLetterToReviewFor = current.id },
                     report = ::report,
                 )
                 is Page.LetterEditor -> LetterEditorPage(
                     repository = letterRepository,
                     draftId = current.draftId,
-                    letterId = current.letterId,
                     prefillBody = current.prefillBody,
                     onSealed = {
                         scope.launch { snackbar.showSnackbar(letterSealed) }
@@ -1390,7 +1443,12 @@ private fun RecyclePage(items: List<RecycleItem>, onOpen: (RecycleItem) -> Unit,
                     color = Quiet, fontSize = 12.sp,
                 )
                 Text(
-                    item.title.ifBlank { stringResource(R.string.entry_media_only) },
+                    when {
+                        // 封存未到期的信只给类型，不给标题
+                        item.kind == "LETTER" && item.title.isBlank() -> stringResource(R.string.mail_type_sealed)
+                        item.title.isBlank() -> stringResource(R.string.entry_media_only)
+                        else -> item.title
+                    },
                     color = Ink, fontSize = 16.sp, maxLines = 3,
                 )
                 Text(stringResource(R.string.recycle_expiry), color = Quiet, fontSize = 11.sp)

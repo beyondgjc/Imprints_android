@@ -109,10 +109,17 @@ class LetterRepository(
 
     suspend fun letter(id: String): FutureLetterEntity? = mailDao.letter(id)
 
-    /** 信件正文与附件。仅在拆信流程里调用；未到期/未拆的信不应走这里读正文。 */
-    suspend fun letterDetail(id: String): LetterDetail? {
+    /**
+     * 信件正文与附件。**这里是数据层硬边界**：未到期或已进回收站一律返回 null。
+     *
+     * 不能只在 UI 判断 —— 通知点击、旧路由、重建的 Activity、进程恢复、缓存与附件读取
+     * 都可能绕过界面条件，必须在 Repository 收口（V02-03）。
+     */
+    suspend fun letterDetail(id: String, nowMs: Long = System.currentTimeMillis()): LetterDetail? {
         val letter = mailDao.letter(id) ?: return null
         val entry = dao.entry(id) ?: return null
+        if (entry.deletedAtMs != null) return null
+        if (!LetterRules.isDue(letter, nowMs)) return null
         return LetterDetail(letter, entry, dao.visuals(id), dao.audio(id))
     }
 
@@ -154,6 +161,8 @@ class LetterRepository(
 
     /** 保存草稿：不触发任务、不计入未读；附件所有权记在草稿名下。 */
     suspend fun saveDraft(draftId: String, draft: LetterDraft) = core.exclusive {
+        // V0.2：草稿只服务独立未封存稿；不能借草稿给已封存的信留一条可编辑的尾巴
+        require(draft.id == null) { "已封存的信不能作为草稿继续编辑" }
         val payload = JSONObject()
             .put("title", draft.title)
             .put("body", draft.body)
@@ -175,7 +184,13 @@ class LetterRepository(
         core.registerMediaOwner(OWNER_DRAFT, draftId, paths)
     }
 
-    suspend fun draft(id: String): LetterDraft? = mailDao.draft(id)?.let(::parseDraft)
+    /**
+     * 读取草稿。V0.2 起**只认独立未封存草稿**：
+     * 关联已封存信的旧编辑草稿（`targetId` 非空）不得再被恢复成可读编辑器，直接返回 null，
+     * 也不参与草稿箱列表（见 [standaloneDrafts]）。
+     */
+    suspend fun draft(id: String): LetterDraft? =
+        mailDao.draft(id)?.takeIf { it.targetId == null }?.let(::parseDraft)
 
     private fun parseDraft(entity: ContentDraftEntity): LetterDraft {
         val payload = JSONObject(entity.payload)
@@ -213,6 +228,9 @@ class LetterRepository(
      * 成功后草稿被消费（删除草稿行与草稿所有权）。
      */
     suspend fun seal(draft: LetterDraft): String = core.exclusive {
+        // V0.2：封存后正文与附件冻结，首版不提供编辑 —— 只允许新建（draft.id 必须为空）。
+        // 下面的 editing/existing 分支仅为兼容旧调用形态保留，本检查之后不可达。
+        require(draft.id == null) { "封存后的信件不能编辑；如需重写，请在设置中删除后重新写信" }
         val body = draft.body.trim()
         LetterRules.validateForSeal(body, draft.visuals.size)
         val now = System.currentTimeMillis()
@@ -323,15 +341,12 @@ class LetterRepository(
 
     // ---------- 到期 / 已读（ML-03） ----------
 
-    /** 打开信封（含提前查看）：记录首次打开时间，但**不算**确认收到未来送达。 */
-    suspend fun markEnvelopeOpened(id: String, nowMs: Long = System.currentTimeMillis()) = core.exclusive {
-        val letter = mailDao.letter(id) ?: return@exclusive
-        if (letter.firstOpenedAtMs == null) mailDao.upsertLetter(letter.copy(firstOpenedAtMs = nowMs))
-    }
-
     /**
      * 到期后成功显示正文才算已读：记录送达已读并取消自动置顶。
-     * 未到期、加载失败都不调用本方法；提前看过不算。
+     * 未到期、加载失败都不调用本方法。
+     *
+     * V0.2 起不再有「提前打开」这一维：`markEnvelopeOpened` 已删除，
+     * `firstOpenedAtMs` 只作为历史字段保留，不参与路由、配色或已读判定。
      */
     suspend fun markDeliveryRead(id: String, nowMs: Long = System.currentTimeMillis()) = core.exclusive {
         val letter = mailDao.letter(id) ?: return@exclusive

@@ -42,6 +42,8 @@ class MainActivity : FragmentActivity() {
     }
     /** 通知点击目标（只带信件 ID，不带内容）；解锁并过隐私门后才消费 */
     private var pendingLetterTarget = androidx.compose.runtime.mutableStateOf<String?>(null)
+    /** 聚合通知点击：没有具体信件，落到时光邮箱列表 */
+    private var pendingOpenMail = androidx.compose.runtime.mutableStateOf(false)
     private var appLocked = androidx.compose.runtime.mutableStateOf(true)
     private var initialized = androidx.compose.runtime.mutableStateOf(false)
     private var lockEnabled = false
@@ -98,6 +100,8 @@ class MainActivity : FragmentActivity() {
         // 通知点击进入：只带信件 ID；真正消费要等同意 + 应用锁通过（ML-06）
         pendingLetterTarget.value =
             intent?.getStringExtra(com.beyondguo.imprints.mail.LetterNotifier.EXTRA_LETTER_ID)
+        pendingOpenMail.value =
+            intent?.getBooleanExtra(com.beyondguo.imprints.mail.LetterNotifier.EXTRA_OPEN_MAIL, false) == true
 
         if (consentGranted == true) {
             startApp()
@@ -131,6 +135,8 @@ class MainActivity : FragmentActivity() {
                         revealEpoch = revealEpoch.intValue,
                         pendingLetterTarget = pendingLetterTarget.value,
                         onLetterTargetConsumed = { pendingLetterTarget.value = null },
+                        pendingOpenMail = pendingOpenMail.value,
+                        onOpenMailConsumed = { pendingOpenMail.value = false },
                         unlockApp = { pin ->
                             val ok = security.verifyAppLock(pin)
                             if (ok) appLocked.value = false
@@ -182,6 +188,11 @@ class MainActivity : FragmentActivity() {
                 .setInitialDelay(15, TimeUnit.MINUTES)
                 .build(),
         )
+        // 通知自愈：旧版本发出的通知里没有跳转参数，用当前代码把「已存在的」通知重建一遍
+        // （只刷新在通知栏里的，不新增、不重复响铃）
+        lifecycleScope.launch {
+            runCatching { com.beyondguo.imprints.mail.LetterNotifier.refreshPending(this@MainActivity) }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -189,6 +200,9 @@ class MainActivity : FragmentActivity() {
         // 热启动的通知点击：更新目标，由安全门后消费
         intent.getStringExtra(com.beyondguo.imprints.mail.LetterNotifier.EXTRA_LETTER_ID)?.let {
             pendingLetterTarget.value = it
+        }
+        if (intent.getBooleanExtra(com.beyondguo.imprints.mail.LetterNotifier.EXTRA_OPEN_MAIL, false)) {
+            pendingOpenMail.value = true
         }
     }
 

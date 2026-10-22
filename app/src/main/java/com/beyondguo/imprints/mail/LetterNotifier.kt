@@ -35,6 +35,8 @@ object LetterNotifier {
     const val CHANNEL_ID = "mail_delivery_v2"
     private const val LEGACY_CHANNEL_ID = "mail_delivery"
     const val EXTRA_LETTER_ID = "com.beyondguo.imprints.extra.LETTER_ID"
+    /** 聚合通知（多封一起补发）不对应单封信：带这个标记，点击后落地到时光邮箱列表 */
+    const val EXTRA_OPEN_MAIL = "com.beyondguo.imprints.extra.OPEN_MAIL"
     private const val SUMMARY_ID = 4200
     private const val ID_BASE = 4300
     private const val TAG = "ImprintsMail"
@@ -64,6 +66,39 @@ object LetterNotifier {
             enableVibration(true)
         }
         manager.createNotificationChannel(channel)
+    }
+
+    /**
+     * 通知自愈：用**当前代码**重建已在通知栏里的未读信通知。
+     *
+     * 为什么需要：`PendingIntent` 缓存的是创建时的 Intent。旧版本发出的通知里没有
+     * `EXTRA_LETTER_ID` / `EXTRA_OPEN_MAIL`，点它们只会上报为空、停在首页；
+     * 而 `notifyDue` 里「已通知过」的记录会让这些信不再重发，旧通知于是永远坏。
+     *
+     * 只刷新**已经存在**的通知（按 activeNotifications 过滤）：不新增、不重复响铃
+     * （`baseBuilder` 已 `setOnlyAlertOnce(true)`），用户滑掉的通知不会被重新弹出来。
+     */
+    suspend fun refreshPending(context: Context) {
+        if (!canPost(context)) return
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        val activeIds = runCatching { manager.activeNotifications.map { it.id }.toSet() }
+            .getOrDefault(emptySet())
+        if (activeIds.isEmpty()) return
+        val letters = ImprintDatabase.get(context).mailReviewDao()
+            .dueLetters(System.currentTimeMillis())
+            .filter { it.notifyEnabled && it.deliveryReadAtMs == null && notificationIdFor(it.entryId) in activeIds }
+        if (letters.isEmpty()) return
+        ensureChannel(context)
+        val compat = NotificationManagerCompat.from(context)
+        letters.forEach { letter ->
+            runCatching {
+                compat.notify(
+                    notificationIdFor(letter.entryId),
+                    baseBuilder(context).setContentIntent(contentIntent(context, letter.entryId)).build(),
+                )
+            }
+        }
+        android.util.Log.i(TAG, "refreshPending refreshed=${letters.size}")
     }
 
     private fun contentIntent(context: Context, entryId: String): PendingIntent {
@@ -124,7 +159,11 @@ object LetterNotifier {
                 val tap = PendingIntent.getActivity(
                     context,
                     SUMMARY_ID,
-                    Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                    Intent(context, MainActivity::class.java)
+                        // 聚合通知没有单封信 ID，必须显式标记「打开邮箱」，
+                        // 否则点进来 pendingLetterTarget 为空、停在首页（曾是这个 bug）
+                        .putExtra(EXTRA_OPEN_MAIL, true)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
                 )
                 manager.notify(
