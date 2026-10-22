@@ -188,6 +188,11 @@ class MainActivity : FragmentActivity() {
                 .setInitialDelay(15, TimeUnit.MINUTES)
                 .build(),
         )
+        // 一次性清理 V0.1 遗留的「关联已封存信的编辑草稿」（V0.2 起已无编辑入口，只是孤儿数据）。
+        // 幂等：没有遗留时什么都不做，只释放这些草稿独占的附件。
+        lifecycleScope.launch {
+            runCatching { letterRepository.purgeLegacyEditingDrafts() }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {

@@ -125,6 +125,10 @@ interface MailReviewDao {
     @Query("SELECT * FROM content_drafts WHERE type = :type AND targetId IS NULL ORDER BY updatedAtMs DESC")
     fun standaloneDrafts(type: String): Flow<List<ContentDraftEntity>>
 
+    /** V0.1 遗留：关联已封存信的编辑草稿（V0.2 起无编辑功能，可在启动时清理）。 */
+    @Query("SELECT * FROM content_drafts WHERE type = :type AND targetId IS NOT NULL")
+    suspend fun draftsWithTarget(type: String): List<ContentDraftEntity>
+
     @Query("SELECT * FROM content_drafts WHERE id = :id LIMIT 1")
     suspend fun draft(id: String): ContentDraftEntity?
 

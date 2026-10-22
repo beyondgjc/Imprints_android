@@ -26,8 +26,18 @@ object LetterBackgroundPolicy {
     /**
      * 请求豁免：优先弹系统的「允许后台运行」对话框；
      * 没有对应页面时退回到电池优化列表，让用户手动把印迹设为「不优化」。
+     *
+     * 已豁免时系统什么都不弹（MIUI 直接返回），用户会以为「点了没反应」。
+     * 而且已豁免的 App 不会出现在电池优化列表里，跳过去也看不到自己 ——
+     * 所以这种情况直接给一句明确反馈，不做无效跳转。
      */
     fun requestExemption(context: Context) {
+        if (isExempt(context)) {
+            android.widget.Toast
+                .makeText(context, "已在后台运行白名单中，无需设置", android.widget.Toast.LENGTH_SHORT)
+                .show()
+            return
+        }
         val direct = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
             .setData(Uri.parse("package:${context.packageName}"))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

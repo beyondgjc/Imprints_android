@@ -220,6 +220,19 @@ class LetterRepository(
         core.deleteFilesIfUnreferenced(paths)
     }
 
+    /**
+     * 清理 V0.1 遗留的「关联已封存信的编辑草稿」。
+     *
+     * V0.2 起封存后正文冻结、不再提供编辑，这些行已无任何入口（[draft] 也读不出来），
+     * 只是占着存储与附件引用。启动时清一次，幂等：没有遗留时什么都不做。
+     * 只释放它们**独占**的附件，共享文件不动。
+     */
+    suspend fun purgeLegacyEditingDrafts(): Int = core.exclusive {
+        val legacy = mailDao.draftsWithTarget(DRAFT_TYPE_LETTER)
+        legacy.forEach { discardDraftRows(it.id) }
+        legacy.size
+    }
+
     // ---------- 封存 / 改期 ----------
 
     /**
