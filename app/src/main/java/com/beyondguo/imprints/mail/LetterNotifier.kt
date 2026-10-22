@@ -68,39 +68,6 @@ object LetterNotifier {
         manager.createNotificationChannel(channel)
     }
 
-    /**
-     * 通知自愈：用**当前代码**重建已在通知栏里的未读信通知。
-     *
-     * 为什么需要：`PendingIntent` 缓存的是创建时的 Intent。旧版本发出的通知里没有
-     * `EXTRA_LETTER_ID` / `EXTRA_OPEN_MAIL`，点它们只会上报为空、停在首页；
-     * 而 `notifyDue` 里「已通知过」的记录会让这些信不再重发，旧通知于是永远坏。
-     *
-     * 只刷新**已经存在**的通知（按 activeNotifications 过滤）：不新增、不重复响铃
-     * （`baseBuilder` 已 `setOnlyAlertOnce(true)`），用户滑掉的通知不会被重新弹出来。
-     */
-    suspend fun refreshPending(context: Context) {
-        if (!canPost(context)) return
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        val activeIds = runCatching { manager.activeNotifications.map { it.id }.toSet() }
-            .getOrDefault(emptySet())
-        if (activeIds.isEmpty()) return
-        val letters = ImprintDatabase.get(context).mailReviewDao()
-            .dueLetters(System.currentTimeMillis())
-            .filter { it.notifyEnabled && it.deliveryReadAtMs == null && notificationIdFor(it.entryId) in activeIds }
-        if (letters.isEmpty()) return
-        ensureChannel(context)
-        val compat = NotificationManagerCompat.from(context)
-        letters.forEach { letter ->
-            runCatching {
-                compat.notify(
-                    notificationIdFor(letter.entryId),
-                    baseBuilder(context).setContentIntent(contentIntent(context, letter.entryId)).build(),
-                )
-            }
-        }
-        android.util.Log.i(TAG, "refreshPending refreshed=${letters.size}")
-    }
-
     private fun contentIntent(context: Context, entryId: String): PendingIntent {
         val intent = Intent(context, MainActivity::class.java)
             .putExtra(EXTRA_LETTER_ID, entryId)

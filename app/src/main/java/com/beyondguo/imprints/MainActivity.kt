@@ -188,11 +188,6 @@ class MainActivity : FragmentActivity() {
                 .setInitialDelay(15, TimeUnit.MINUTES)
                 .build(),
         )
-        // 通知自愈：旧版本发出的通知里没有跳转参数，用当前代码把「已存在的」通知重建一遍
-        // （只刷新在通知栏里的，不新增、不重复响铃）
-        lifecycleScope.launch {
-            runCatching { com.beyondguo.imprints.mail.LetterNotifier.refreshPending(this@MainActivity) }
-        }
     }
 
     override fun onNewIntent(intent: Intent) {
