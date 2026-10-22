@@ -28,6 +28,7 @@ import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -175,7 +176,15 @@ fun ReviewHomePage(
                     Text(rangeLabel(range), color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                     if (isCurrent) Text(stringResource(R.string.review_as_of_today), color = Quiet, fontSize = 11.sp)
                 }
-                IconButton(onClick = { if (rangeShift < 0) rangeShift++ }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, stringResource(R.string.action_continue), tint = Quiet) }
+                // 右箭头表示「往新的方向走」，到最新一个完整周期就不能再往前 ——
+                // 必须给禁用态，否则箭头看着能点、点了没反应，像坏了。
+                IconButton(onClick = { if (rangeShift < 0) rangeShift++ }, enabled = rangeShift < 0) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        stringResource(R.string.action_continue),
+                        tint = if (rangeShift < 0) Quiet else Line,
+                    )
+                }
             }
         } else {
             Row(
@@ -1006,6 +1015,7 @@ fun ReviewEditorPage(
     var candidates by remember { mutableStateOf(emptyList<ReviewCandidate>()) }
     var editingRange by remember { mutableStateOf(0) }   // 0 无 / 1 起 / 2 止
     var saving by remember { mutableStateOf(false) }
+    var showEntries by remember { mutableStateOf(false) }
 
     val range = remember(startText, endText) {
         runCatching { DateRange(LocalDate.parse(startText), LocalDate.parse(endText)) }.getOrNull()
@@ -1104,25 +1114,26 @@ fun ReviewEditorPage(
                     colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green),
                 )
             }
-            // V0.2 动态范围：不再勾选成员。这里直接列出「当前起止日期 + 标签条件」命中的全部印迹，
-            // 新增/补记会自动出现，改了事件日期或标签会自动移出 —— 所以没有勾选、移除、替换。
+            // V0.2 动态范围：不再勾选成员，这里只显示命中条数，点开半屏面板浏览全部记录。
+            // 直接平铺会把编辑页撑得很长，写正文时要一直往下滚。
             item {
-                Text(
-                    stringResource(R.string.review_period_entries, candidates.size),
-                    Modifier.padding(top = 4.dp), color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Medium,
-                )
-            }
-            if (candidates.isEmpty()) {
-                item { Text(stringResource(R.string.review_period_empty), color = Quiet, fontSize = 13.sp) }
-            } else {
-                items(candidates, key = { it.entry.id }) { candidate ->
-                    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                        Text(candidate.entry.eventLocalMinute.replace('T', ' '), color = Quiet, fontSize = 12.sp)
-                        Text(
-                            candidate.entry.body.ifBlank { stringResource(R.string.entry_media_only) },
-                            color = Ink, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                        )
-                    }
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable(enabled = candidates.isNotEmpty()) { showEntries = true }
+                        .padding(vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        stringResource(R.string.review_period_entries, candidates.size),
+                        Modifier.weight(1f), color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        if (candidates.isEmpty()) stringResource(R.string.review_period_empty)
+                        else stringResource(R.string.review_view_all),
+                        color = Quiet, fontSize = 13.sp,
+                    )
                 }
             }
         }
@@ -1139,4 +1150,39 @@ fun ReviewEditorPage(
         },
     )
 
+    if (showEntries) ReviewEntriesSheet(candidates) { showEntries = false }
+}
+
+/**
+ * 这段时间的印迹：半屏面板浏览。
+ *
+ * 不把列表平铺在编辑页里的原因：记录一多，正文下面会被撑得很长，写的时候得一直往下滚。
+ * 面板只负责"看一眼这段时间记了什么"，勾选/排序都不存在（成员由范围+标签动态决定）。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReviewEntriesSheet(candidates: List<ReviewCandidate>, onDismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp)) {
+            Text(
+                stringResource(R.string.review_period_entries, candidates.size),
+                color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+            LazyColumn(
+                Modifier.fillMaxWidth().heightIn(max = 520.dp),
+                contentPadding = PaddingValues(bottom = 32.dp),
+            ) {
+                items(candidates, key = { it.entry.id }) { candidate ->
+                    Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
+                        Text(candidate.entry.eventLocalMinute.replace('T', ' '), color = Quiet, fontSize = 12.sp)
+                        Text(
+                            candidate.entry.body.ifBlank { stringResource(R.string.entry_media_only) },
+                            color = Ink, fontSize = 14.sp, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
