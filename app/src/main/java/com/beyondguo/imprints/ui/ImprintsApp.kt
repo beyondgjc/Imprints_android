@@ -89,6 +89,8 @@ private sealed interface Page {
     data object Settings : Page
     data object Recycle : Page
     data object Tags : Page
+    /** 设置 →「管理封存信件」：只有日期的低频维护入口。 */
+    data object SealedLetters : Page
     data object Search : Page
     data object PrivacyPolicy : Page
     data object UserAgreement : Page
@@ -336,6 +338,7 @@ fun ImprintsApp(
         page = when (page) {
             is Page.RecycleDetail -> Page.Recycle
             Page.Tags -> Page.Settings
+            Page.SealedLetters -> Page.Settings
             is Page.PrivacyPolicy, is Page.UserAgreement -> Page.Settings
             is Page.ReviewDetail, is Page.ReviewWizard -> Page.Review
             is Page.LetterEnvelope, is Page.LetterBody, is Page.LetterEditor -> Page.Mail
@@ -356,6 +359,7 @@ fun ImprintsApp(
                 title = { Text(when (page) {
                     Page.Timeline -> stringResource(R.string.timeline_title); Page.Settings -> "设置"; Page.Recycle -> stringResource(R.string.settings_recycle)
                     Page.Tags -> stringResource(R.string.settings_tags)
+                    Page.SealedLetters -> stringResource(R.string.mail_manage_sealed)
                     Page.Search -> pageSearch; is Page.Detail -> pageDetail
                     is Page.RecycleDetail -> pageRecycleDetail
                     is Page.Editor -> if ((page as Page.Editor).id == null) editorNewTitle else editorEditTitle
@@ -374,6 +378,7 @@ fun ImprintsApp(
                     page = when (page) {
                         is Page.RecycleDetail -> Page.Recycle
                         Page.Tags -> Page.Settings
+                        Page.SealedLetters -> Page.Settings
                         is Page.PrivacyPolicy, is Page.UserAgreement -> Page.Settings
                         is Page.ReviewDetail, is Page.ReviewWizard -> Page.Review
                         is Page.LetterEnvelope, is Page.LetterBody, is Page.LetterEditor -> Page.Mail
@@ -537,9 +542,15 @@ fun ImprintsApp(
                         onDeleteDraft = { id -> scope.launch { runCatching { letterRepository.deleteDraft(id) }.onFailure(::report) } },
                     )
                 }
+                Page.SealedLetters -> SealedLettersPage(
+                    repository = letterRepository,
+                    nowMs = nowMs,
+                    onError = ::report,
+                )
                 Page.Settings -> SettingsPage(feelingMode, feelingBioEnabled, appLockEnabled, appBioEnabled,
                     onRecycle = { page = Page.Recycle },
                     onTags = { page = Page.Tags },
+                    onManageSealed = { page = Page.SealedLetters },
                     onFeeling = {
                         if (feelingMode == "OFF") askPin("feeling-enable", pinSetFeeling)
                         else confirmDisableFeeling = true
@@ -1124,7 +1135,8 @@ private fun PinDialog(title: String, setup: Boolean, onDismiss: () -> Unit, onCo
 @Composable
 private fun SettingsPage(
     feelingMode: String, feelingBio: Boolean, appLock: Boolean, appBio: Boolean,
-    onRecycle: () -> Unit, onTags: () -> Unit, onFeeling: () -> Unit, onFeelingBio: () -> Unit, onFeelingPinChange: () -> Unit,
+    onRecycle: () -> Unit, onTags: () -> Unit, onManageSealed: () -> Unit,
+    onFeeling: () -> Unit, onFeelingBio: () -> Unit, onFeelingPinChange: () -> Unit,
     onAppLock: () -> Unit, onAppBio: () -> Unit, onAppPinChange: () -> Unit,
     onLockNow: () -> Unit,
     onExport: () -> Unit, onImport: () -> Unit,
@@ -1242,6 +1254,13 @@ private fun SettingsPage(
                         if (exempt) R.string.settings_background_on else R.string.settings_background_off,
                     ),
                     onClick = { com.beyondguo.imprints.mail.LetterBackgroundPolicy.requestExemption(context) },
+                )
+                FineDivider()
+                // 唯一的主动管理入口：低频、不附数量（产品规格 ML-02）
+                SettingsRow(
+                    title = stringResource(R.string.mail_manage_sealed),
+                    subtitle = stringResource(R.string.mail_manage_sealed_sub),
+                    onClick = onManageSealed,
                 )
             }
         }

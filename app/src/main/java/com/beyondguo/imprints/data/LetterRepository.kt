@@ -89,7 +89,16 @@ class LetterRepository(
 
     val sealedLetters: Flow<List<LetterListRow>> = mailDao.sealedLetters()
     val recycledLetters: Flow<List<LetterListRow>> = mailDao.recycledLetters()
-    val letterDrafts: Flow<List<ContentDraftEntity>> = mailDao.drafts(DRAFT_TYPE_LETTER)
+    /**
+     * 草稿箱：**只含独立未封存草稿**（`targetId` 为空）。
+     * 关联已封存信的旧编辑草稿不得作为续写入口，所以不走 [mailDao.drafts] 的全量查询。
+     */
+    val standaloneDrafts: Flow<List<ContentDraftEntity>> = mailDao.standaloneDrafts(DRAFT_TYPE_LETTER)
+    /**
+     * 封存管理页：仅日期的最小投影，不含标题／正文／附件。
+     * 已确认到期的行由 DAO 过滤掉；尚未确认但已过时刻的行由界面按 now 再滤。
+     */
+    val sealedMetas: Flow<List<SealedLetterMeta>> = mailDao.sealedLetterMetas()
     val reviewDrafts: Flow<List<ContentDraftEntity>> = mailDao.drafts(DRAFT_TYPE_REVIEW)
 
     suspend fun letterRow(id: String): LetterListRow? =

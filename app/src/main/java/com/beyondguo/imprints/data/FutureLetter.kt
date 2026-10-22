@@ -84,3 +84,19 @@ data class LetterListRow(
     val updatedAtMs: Long,
     val deletedAtMs: Long?,
 )
+
+/**
+ * 封存管理页的最小投影（ML-02）：**只有日期与调度版本**。
+ *
+ * 刻意不包含标题、正文、附件与 firstOpenedAtMs —— 管理页整行不可进入信封或正文，
+ * 改期只写送达元数据，删除只按封存／送达日期确认。数据层不提供全文就无法被误用。
+ */
+data class SealedLetterMeta(
+    val entryId: String,
+    /** 封存时间，取 entries.createdAtMs */
+    val sealedAtMs: Long,
+    val deliverAtMs: Long,
+    val deliverLocalMinute: String,
+    val deliverZoneId: String,
+    val scheduleRevision: Int,
+)

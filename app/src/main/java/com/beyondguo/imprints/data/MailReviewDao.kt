@@ -85,6 +85,21 @@ interface MailReviewDao {
     @Query("SELECT * FROM letter_notification_events WHERE entryId = :id")
     suspend fun notificationEvents(id: String): List<LetterNotificationEventEntity>
 
+    /**
+     * 封存管理页专用：**只投影日期**，不含标题／正文／附件／firstOpenedAtMs。
+     * 返回未删除且尚未确认到期的行；是否「未到期」由调用方按 now 再过滤，
+     * 这样 Flow 不绑定某个时刻的快照，管理页跨过到期时间也能靠重新读库得到正确结果。
+     */
+    @Query(
+        "SELECT l.entryId AS entryId, e.createdAtMs AS sealedAtMs, l.deliverAtMs AS deliverAtMs, " +
+            "l.deliverLocalMinute AS deliverLocalMinute, l.deliverZoneId AS deliverZoneId, " +
+            "l.scheduleRevision AS scheduleRevision " +
+            "FROM future_letters l JOIN entries e ON e.id = l.entryId " +
+            "WHERE e.deletedAtMs IS NULL AND l.deliveredAtMs IS NULL " +
+            "ORDER BY l.deliverAtMs ASC, l.entryId ASC",
+    )
+    fun sealedLetterMetas(): Flow<List<SealedLetterMeta>>
+
     @Upsert suspend fun upsertLetter(value: FutureLetterEntity)
 
     @Query("DELETE FROM future_letters WHERE entryId = :id")
@@ -102,6 +117,13 @@ interface MailReviewDao {
 
     @Query("SELECT * FROM content_drafts WHERE type = :type ORDER BY updatedAtMs DESC")
     fun drafts(type: String): Flow<List<ContentDraftEntity>>
+
+    /**
+     * 草稿箱专用：只返回**独立未封存草稿**（`targetId IS NULL`）。
+     * 关联已封存信的旧编辑草稿不得作为续写入口，因此不能出现在草稿箱里。
+     */
+    @Query("SELECT * FROM content_drafts WHERE type = :type AND targetId IS NULL ORDER BY updatedAtMs DESC")
+    fun standaloneDrafts(type: String): Flow<List<ContentDraftEntity>>
 
     @Query("SELECT * FROM content_drafts WHERE id = :id LIMIT 1")
     suspend fun draft(id: String): ContentDraftEntity?

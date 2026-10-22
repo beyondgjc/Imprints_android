@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -49,6 +50,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
@@ -56,6 +58,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -125,6 +129,15 @@ internal fun LetterListRow.toEntity() =
 
 // ---------- 邮箱一级页 ----------
 
+/** 邮箱顶部两个标签。未到期信不属于任何标签，仍是内部调度状态。 */
+private enum class MailTab { DELIVERED, DRAFTS }
+
+/**
+ * 时光邮箱一级页（ML-04）：只做「收信处」。
+ *
+ * 顶部「已送达 / 草稿箱」，默认已送达。未到期的封存信不出现在这里，
+ * 也不显示其数量 —— 封存是内部调度状态，不是邮箱分组（见产品规格第 2 节）。
+ */
 @Composable
 fun MailHomePage(
     repository: LetterRepository,
@@ -134,15 +147,20 @@ fun MailHomePage(
     onOpenDraft: (String) -> Unit,
     onDeleteDraft: (String) -> Unit,
 ) {
-    val scope = rememberCoroutineScope()
     val sealed by repository.sealedLetters.collectAsState(initial = emptyList())
-    val drafts by repository.letterDrafts.collectAsState(initial = emptyList())
-    var showUnreadOnly by remember { mutableStateOf(false) }
-    // 待送达 / 已送达 两个分组：点标签切换，默认看「待送达」
-    var showDeliveredTab by remember { mutableStateOf(false) }
-    val delivered = sealed.filter { LetterRules.isDue(it.toEntity(), nowMs) }
-        .sortedWith(compareByDescending<LetterListRow> { it.deliverAtMs }.thenByDescending { it.entryId })
-    val waiting = sealed.filter { !LetterRules.isDue(it.toEntity(), nowMs) }
+    // 草稿箱只收独立未封存草稿：关联已封存信的旧编辑草稿不得作为续写入口
+    val drafts by repository.standaloneDrafts.collectAsState(initial = emptyList())
+    var tab by rememberSaveable { mutableStateOf(MailTab.DELIVERED) }
+    var showUnreadOnly by rememberSaveable { mutableStateOf(false) }
+    // 两组各自保留滚动位置：切标签再切回来不跳回顶部
+    val deliveredListState = rememberLazyListState()
+    val draftsListState = rememberLazyListState()
+
+    val delivered = remember(sealed, nowMs) {
+        sealed.filter { LetterRules.isDue(it.toEntity(), nowMs) }
+            .sortedWith(compareByDescending<LetterListRow> { it.deliverAtMs }.thenByDescending { it.entryId })
+    }
+    val unreadCount = delivered.count { it.deliveryReadAtMs == null }
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -153,35 +171,24 @@ fun MailHomePage(
             Button(onClick = onWrite, shape = RoundedCornerShape(12.dp)) { Text(stringResource(R.string.mail_write)) }
         }
 
-        if (drafts.isNotEmpty()) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(stringResource(R.string.mail_draft_badge, drafts.size), color = Quiet, fontSize = 13.sp)
-            }
-            drafts.forEach { draft ->
-                DraftRow(draft = draft, onOpen = { onOpenDraft(draft.id) }, onDelete = { onDeleteDraft(draft.id) })
-            }
-        }
-
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TagChip(
-                text = stringResource(R.string.mail_tab_pending) + " " + waiting.size,
-                selected = !showDeliveredTab,
-                onClick = { showDeliveredTab = false },
+                text = stringResource(R.string.mail_tab_delivered) + " " + delivered.size,
+                selected = tab == MailTab.DELIVERED,
+                onClick = { tab = MailTab.DELIVERED },
             )
             TagChip(
-                text = stringResource(R.string.mail_tab_delivered) + " " + delivered.size,
-                selected = showDeliveredTab,
-                onClick = { showDeliveredTab = true },
+                text = stringResource(R.string.mail_tab_drafts) + " " + drafts.size,
+                selected = tab == MailTab.DRAFTS,
+                onClick = { tab = MailTab.DRAFTS },
             )
             Spacer(Modifier.weight(1f))
-            if (showDeliveredTab && delivered.any { it.deliveryReadAtMs == null }) {
+            // 只看未读只对「已送达」有意义
+            if (tab == MailTab.DELIVERED && unreadCount > 0) {
                 TagChip(
                     text = stringResource(R.string.mail_unread_only),
                     selected = showUnreadOnly,
@@ -190,42 +197,63 @@ fun MailHomePage(
             }
         }
 
-        val visible = if (showDeliveredTab) {
-            delivered.filter { !showUnreadOnly || it.deliveryReadAtMs == null }
-        } else {
-            waiting
-        }
-        LazyColumn(
-            Modifier.fillMaxSize().padding(horizontal = 22.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(bottom = 32.dp),
-        ) {
-            if (visible.isEmpty()) {
-                item {
-                    Column(
-                        Modifier.fillMaxWidth().padding(top = 48.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Text(
-                            stringResource(if (showDeliveredTab) R.string.mail_empty_delivered else R.string.mail_empty_pending),
-                            color = Ink, fontSize = 21.sp, fontWeight = FontWeight.SemiBold,
+        if (tab == MailTab.DELIVERED) {
+            val visible = if (showUnreadOnly) delivered.filter { it.deliveryReadAtMs == null } else delivered
+            LazyColumn(
+                Modifier.fillMaxSize().padding(horizontal = 22.dp),
+                state = deliveredListState,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(bottom = 32.dp),
+            ) {
+                if (visible.isEmpty()) {
+                    item {
+                        MailEmptyState(
+                            title = stringResource(R.string.mail_empty_delivered),
+                            subtitle = stringResource(R.string.mail_empty_delivered_sub),
+                            onWrite = onWrite,
                         )
-                        Text(
-                            stringResource(if (showDeliveredTab) R.string.mail_empty_delivered_sub else R.string.mail_empty_pending_sub),
-                            color = Quiet, fontSize = 14.sp,
-                        )
-                        if (!showDeliveredTab) {
-                            Spacer(Modifier.height(8.dp))
-                            Button(onClick = onWrite, shape = RoundedCornerShape(12.dp)) { Text(stringResource(R.string.mail_write)) }
-                        }
                     }
                 }
+                items(visible, key = { it.entryId }) { row ->
+                    LetterCard(row = row, nowMs = nowMs, onClick = { onOpenEnvelope(row.entryId) })
+                }
             }
-            items(visible, key = { (if (showDeliveredTab) "d-" else "w-") + it.entryId }) { row ->
-                LetterCard(row = row, nowMs = nowMs, onClick = { onOpenEnvelope(row.entryId) })
+        } else {
+            LazyColumn(
+                Modifier.fillMaxSize().padding(horizontal = 22.dp),
+                state = draftsListState,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(bottom = 32.dp),
+            ) {
+                if (drafts.isEmpty()) {
+                    item {
+                        MailEmptyState(
+                            title = stringResource(R.string.mail_empty_drafts),
+                            subtitle = stringResource(R.string.mail_empty_drafts_sub),
+                            onWrite = onWrite,
+                        )
+                    }
+                }
+                items(drafts, key = { it.id }) { draft ->
+                    DraftRow(draft = draft, onOpen = { onOpenDraft(draft.id) }, onDelete = { onDeleteDraft(draft.id) })
+                }
             }
         }
+    }
+}
+
+/** 两个分组共用的空态：文案 + 写信入口。不透露是否存在未到期信。 */
+@Composable
+private fun MailEmptyState(title: String, subtitle: String, onWrite: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().padding(top = 48.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(title, color = Ink, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
+        Text(subtitle, color = Quiet, fontSize = 14.sp)
+        Spacer(Modifier.height(8.dp))
+        Button(onClick = onWrite, shape = RoundedCornerShape(12.dp)) { Text(stringResource(R.string.mail_write)) }
     }
 }
 
@@ -234,7 +262,7 @@ private fun DraftRow(draft: ContentDraftEntity, onOpen: () -> Unit, onDelete: ()
     val payload = runCatching { org.json.JSONObject(draft.payload) }.getOrNull()
     val title = payload?.optString("title").orEmpty().ifBlank { stringResource(R.string.mail_letter_default_title) }
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(horizontal = 22.dp, vertical = 10.dp),
+        Modifier.fillMaxWidth().clickable(onClick = onOpen).padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Icons.Default.MailOutline, null, tint = Quiet, modifier = Modifier.size(18.dp))
@@ -249,15 +277,25 @@ private fun DraftRow(draft: ContentDraftEntity, onOpen: () -> Unit, onDelete: ()
 @Composable
 private fun LetterCard(row: LetterListRow, nowMs: Long, onClick: () -> Unit) {
     val due = LetterRules.isDue(row.toEntity(), nowMs)
-    OutlinePanel(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+    // 只有「到期且未读」才用品牌绿：标题与送达日期变绿 + 保留「未拆」标识。
+    // 已读恢复普通配色（标题 Ink、两个日期 Quiet），不另加「已读」标签。
+    val unread = due && row.deliveryReadAtMs == null
+    val title = LetterRules.displayTitle(row.title)
+    val statusText = stringResource(if (unread) R.string.a11y_mail_unread else R.string.a11y_mail_read)
+    OutlinePanel(
+        Modifier.fillMaxWidth()
+            .semantics { contentDescription = "$title，$statusText" }
+            .clickable(onClick = onClick),
+    ) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    LetterRules.displayTitle(row.title),
+                    title,
                     Modifier.weight(1f),
-                    color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+                    color = if (unread) Green else Ink,
+                    fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
                 )
-                if (due && row.deliveryReadAtMs == null) {
+                if (unread) {
                     Text(
                         stringResource(R.string.mail_state_unread),
                         Modifier.background(PaleGreen, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 3.dp),
@@ -266,7 +304,7 @@ private fun LetterCard(row: LetterListRow, nowMs: Long, onClick: () -> Unit) {
                 }
             }
             Text(stringResource(R.string.mail_written_on, formatEpochDate(row.createdAtMs)), color = Quiet, fontSize = 12.sp)
-            Text(deliverCoverLabel(row, nowMs), color = if (due) Green else Quiet, fontSize = 13.sp)
+            Text(deliverCoverLabel(row, nowMs), color = if (unread) Green else Quiet, fontSize = 13.sp)
         }
     }
 }

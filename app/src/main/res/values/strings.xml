@@ -343,17 +343,29 @@
 
     <!-- 时光邮箱列表 -->
     <string name="mail_title">时光邮箱</string>
-    <string name="mail_tab_pending">待送达</string>
     <string name="mail_tab_delivered">已送达</string>
+    <string name="mail_tab_drafts">草稿箱</string>
     <string name="mail_drafts">草稿</string>
+    <!-- 回顾页仍在使用这个「N 篇草稿」计数（命名沿用了 mail 前缀，语义通用） -->
     <string name="mail_draft_badge">%1$d 篇草稿</string>
     <string name="mail_write">写一封信</string>
-    <string name="mail_empty_pending">还没有待送达的信</string>
-    <string name="mail_empty_pending_sub">写一封信给未来的自己</string>
     <string name="mail_empty_delivered">还没有已送达的信</string>
     <string name="mail_empty_delivered_sub">到期的信会出现在这里，等待你拆开</string>
     <string name="mail_empty_drafts">还没有草稿</string>
+    <string name="mail_empty_drafts_sub">写到一半的信，可以留在这里慢慢完成</string>
     <string name="mail_unread_only">只看未读</string>
+    <string name="a11y_mail_unread">未读</string>
+    <string name="a11y_mail_read">已读</string>
+    <string name="mail_manage_sealed">管理封存信件</string>
+    <string name="mail_manage_sealed_sub">改期或删除；不影响已送达的信</string>
+    <string name="mail_manage_sealed_intro">这里只显示日期。封存后不能提前阅读，也不能修改正文。</string>
+    <string name="mail_manage_sealed_empty">没有未到期的封存信件</string>
+    <string name="mail_sealed_at">封存于 %1$s</string>
+    <string name="mail_deliver_at">送达于 %1$s</string>
+    <string name="mail_manage_reschedule">改期</string>
+    <string name="mail_manage_delete">删除</string>
+    <string name="mail_manage_delete_title">删除这封封存信件？</string>
+    <string name="mail_manage_delete_message">原定于 %1$s 送达，删除后将取消送达，7 天内可以恢复。%2$s</string>
     <string name="mail_letter_default_title">给未来的自己</string>
     <string name="mail_deliver_today">今天送达</string>
     <string name="mail_deliver_tomorrow">明天送达</string>
