@@ -173,12 +173,35 @@ class ReviewRepository(
 
     suspend fun detail(id: String): ReviewDetail? {
         val review = mailDao.review(id) ?: return null
-        // V0.2：库里不再存内容副本，一律用原印迹的**当前数据**填充视图字段。
-        // enrich 只在内存里填空位，不回写数据库 —— 所以原印迹一改，总结立刻显示最新值，
-        // 「刷新预览」这一步也就不需要了。
-        val sources = mailDao.sources(id).map { enrich(it) }
+        // V0.2 动态范围：总结的成员**不是存下来的清单**，而是按「起止日期 + 可选标签条件」现查。
+        // 所以新增/补记符合条件的印迹会自动出现，改了事件日期或标签会自动移出，
+        // 也就没有「失效／范围外关联列表」和「移除／替换」这些流程了。
+        val range = DateRange(
+            ReviewPeriods.parseDate(review.startLocalDate),
+            ReviewPeriods.parseDate(review.endLocalDateInclusive),
+        )
+        val tagIds = review.selectedTagIds.split(',').filter(String::isNotBlank).toSet()
+        val sources = candidates(range, tagIds).mapIndexed { index, candidate -> rowOf(review, candidate, index) }
         val media = sources.flatMap { mediaOf(it) }
         return ReviewDetail(review, sources, media, statsOf(sources, media))
+    }
+
+    /** 把查询结果包装成「来源行」给 UI 用（纯视图对象，不落库）。 */
+    private suspend fun rowOf(review: ReviewEntity, candidate: ReviewCandidate, order: Int): ReviewSourceEntity {
+        val tagRows = dao.tagsOnce()
+        val names = candidate.tagIds.mapNotNull { id -> tagRows.firstOrNull { it.id == id }?.name }
+        return ReviewSourceEntity(
+            reviewId = review.id,
+            sourceKind = SourceKind.ENTRY.name,
+            sourceId = candidate.entry.id,
+            sourceUpdatedAtMs = candidate.entry.updatedAtMs,
+            eventDate = candidate.entry.eventLocalMinute.take(10),
+            featuredOrder = order,
+            bodySnapshot = candidate.entry.body,
+            tagSnapshot = names.joinToString(","),
+            visibility = SourceVisibility.VISIBLE.name,
+            createdAtMs = review.createdAtMs,
+        )
     }
 
     /** 用原印迹当前数据填充来源行；来源已进回收站/被彻底删除时清空内容，只留占位。 */
@@ -275,13 +298,6 @@ class ReviewRepository(
         val reviewId = draft.reviewId ?: UUID.randomUUID().toString()
         val existing = draft.reviewId?.let { mailDao.review(it) }
         val now = System.currentTimeMillis()
-        val keys = draft.includedKeys.mapNotNull(SourceKey::parse).distinct()
-        val featuredOrder = draft.featuredKeys.mapIndexedNotNull { index, key -> SourceKey.parse(key)?.let { it to index } }.toMap()
-
-        // V0.2：只存关联关系与顺序，不复制正文／标签／媒体（内容一律现读原印迹）
-        val rows = keys.mapIndexed { index, key ->
-            buildSourceRow(reviewId, key, featuredOrder[key] ?: index, now)
-        }
         val tagRows = dao.tagsOnce()
         val tagSnapshotNames = draft.selectedTagIds.joinToString(",") { id -> tagRows.firstOrNull { it.id == id }?.name ?: id }
 
@@ -295,7 +311,9 @@ class ReviewRepository(
                     title = draft.title.trim(),
                     userBody = draft.userBody,
                     closingText = draft.closingText,
-                    coverSourceKey = draft.coverSourceKey?.takeIf { key -> keys.any { it.toString() == key } },
+                    // 封面只保留一个可失效的媒体指针，不校验成员资格：指向的记录/媒体失效时
+                    // 详情页降级为默认封面（RV-06）
+                    coverSourceKey = draft.coverSourceKey,
                     selectedTagIds = draft.selectedTagIds.joinToString(","),
                     tagNameSnapshot = tagSnapshotNames,
                     createdAtMs = existing?.createdAtMs ?: now,
@@ -306,8 +324,8 @@ class ReviewRepository(
             )
             mailDao.deleteSources(reviewId)
             mailDao.deleteSourceMedia(reviewId)
-            rows.forEach { mailDao.upsertSource(it) }
-            // 不再写 review_source_media、也不再注册媒体所有权：附件始终归原印迹所有
+            // V0.2 动态范围：成员由「起止日期 + 标签条件」现查，不保存来源 ID 清单或顺序，
+            // 所以这里不写 review_sources / review_source_media（上面的 delete 只清历史残留）。
         }
         draft.draftId?.let { mailDao.deleteDraft(it) }
         reviewId

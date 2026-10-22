@@ -1003,10 +1003,8 @@ fun ReviewEditorPage(
     var endText by remember { mutableStateOf(initialDraft?.endLocalDateInclusive ?: today.toString()) }
     var title by remember { mutableStateOf(initialDraft?.title ?: "") }
     var body by remember { mutableStateOf(initialDraft?.userBody ?: "") }
-    var selectedKeys by remember { mutableStateOf(initialDraft?.includedKeys ?: emptyList()) }
     var candidates by remember { mutableStateOf(emptyList<ReviewCandidate>()) }
     var editingRange by remember { mutableStateOf(0) }   // 0 无 / 1 起 / 2 止
-    var showPicker by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
 
     val range = remember(startText, endText) {
@@ -1032,7 +1030,6 @@ fun ReviewEditorPage(
             selectedTagIds = emptyList(),
             title = title,
             userBody = body,
-            includedKeys = selectedKeys,
         )
     }
 
@@ -1045,7 +1042,7 @@ fun ReviewEditorPage(
     fun commit() {
         val draft = buildDraft() ?: return
         // 新建至少要「非空正文」或「一条关联」；只关联了失效来源时按正文判断
-        if (draft.userBody.isBlank() && draft.includedKeys.isEmpty()) {
+        if (draft.userBody.isBlank() && candidates.isEmpty()) {
             report(IllegalStateException(needContent))
             return
         }
@@ -1078,43 +1075,54 @@ fun ReviewEditorPage(
             }
         }
 
-        Column(
+        LazyColumn(
             Modifier.fillMaxSize().imePadding().padding(horizontal = 22.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(bottom = 28.dp),
         ) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ReviewDateField(stringResource(R.string.review_step_range), startText, { editingRange = 1 }, Modifier.weight(1f))
-                ReviewDateField(stringResource(R.string.review_as_of_today), endText, { editingRange = 2 }, Modifier.weight(1f))
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ReviewDateField(stringResource(R.string.review_step_range), startText, { editingRange = 1 }, Modifier.weight(1f))
+                    ReviewDateField(stringResource(R.string.review_as_of_today), endText, { editingRange = 2 }, Modifier.weight(1f))
+                }
             }
-
-            OutlinedTextField(
-                title, { title = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text(stringResource(R.string.review_title_optional), color = Quiet) },
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green),
-            )
-
-            OutlinedTextField(
-                body, { body = it },
-                // 用高度区间而不是 weight(1f)：weight 会把剩余空间全吃掉，
-                // 下面的「关联印迹」整行被挤到屏幕外（真机 dump 里 bounds 是 [0,0][0,0]）。
-                modifier = Modifier.fillMaxWidth().heightIn(min = 150.dp, max = 320.dp),
-                placeholder = { Text(stringResource(R.string.review_write_hint), color = Quiet) },
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green),
-            )
-
-            Row(
-                Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    if (selectedKeys.isEmpty()) stringResource(R.string.review_linked_none)
-                    else stringResource(R.string.review_linked_count, selectedKeys.size),
-                    Modifier.weight(1f), color = Quiet, fontSize = 13.sp,
+            item {
+                OutlinedTextField(
+                    title, { title = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text(stringResource(R.string.review_title_optional), color = Quiet) },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green),
                 )
-                TextButton(onClick = { showPicker = true }) {
-                    Text(stringResource(R.string.review_add_linked), color = Green)
+            }
+            item {
+                OutlinedTextField(
+                    body, { body = it },
+                    // 用高度区间而不是 weight：weight 会把剩余空间吃光，把下面的内容挤出可视区
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 150.dp, max = 300.dp),
+                    placeholder = { Text(stringResource(R.string.review_write_hint), color = Quiet) },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green),
+                )
+            }
+            // V0.2 动态范围：不再勾选成员。这里直接列出「当前起止日期 + 标签条件」命中的全部印迹，
+            // 新增/补记会自动出现，改了事件日期或标签会自动移出 —— 所以没有勾选、移除、替换。
+            item {
+                Text(
+                    stringResource(R.string.review_period_entries, candidates.size),
+                    Modifier.padding(top = 4.dp), color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                )
+            }
+            if (candidates.isEmpty()) {
+                item { Text(stringResource(R.string.review_period_empty), color = Quiet, fontSize = 13.sp) }
+            } else {
+                items(candidates, key = { it.entry.id }) { candidate ->
+                    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                        Text(candidate.entry.eventLocalMinute.replace('T', ' '), color = Quiet, fontSize = 12.sp)
+                        Text(
+                            candidate.entry.body.ifBlank { stringResource(R.string.entry_media_only) },
+                            color = Ink, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
         }
@@ -1131,67 +1139,4 @@ fun ReviewEditorPage(
         },
     )
 
-    if (showPicker) ReviewPickDialog(
-        candidates = candidates,
-        selected = selectedKeys,
-        onToggle = { key ->
-            selectedKeys = if (key in selectedKeys) selectedKeys - key else selectedKeys + key
-        },
-        onDismiss = { showPicker = false },
-    )
-}
-
-/** 关联选择面板：一套勾选（V0.2 废止了「纳入统计 / 精选片段」双选）。 */
-@Composable
-private fun ReviewPickDialog(
-    candidates: List<ReviewCandidate>,
-    selected: List<String>,
-    onToggle: (String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.review_pick_title)) },
-        text = {
-            if (candidates.isEmpty()) {
-                Text(stringResource(R.string.review_empty_sub), color = Quiet, fontSize = 13.sp)
-            } else {
-                LazyColumn(Modifier.heightIn(max = 420.dp)) {
-                    items(candidates, key = { it.key.toString() }) { candidate ->
-                        val key = candidate.key.toString()
-                        val picked = key in selected
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (picked) PaleGreen else androidx.compose.ui.graphics.Color.Transparent)
-                                .clickable { onToggle(key) }
-                                .padding(vertical = 4.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            Checkbox(
-                                checked = picked,
-                                onCheckedChange = { onToggle(key) },
-                                colors = CheckboxDefaults.colors(
-                                    checkedColor = Green,
-                                    uncheckedColor = Line,
-                                    checkmarkColor = androidx.compose.ui.graphics.Color.White,
-                                ),
-                            )
-                            Column(Modifier.weight(1f)) {
-                                Text(candidate.entry.eventLocalMinute.replace('T', ' '), color = Quiet, fontSize = 12.sp)
-                                Text(
-                                    candidate.entry.body.ifBlank { stringResource(R.string.entry_media_only) },
-                                    color = Ink, fontSize = 14.sp,
-                                    maxLines = 2, overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.review_pick_done)) } },
-    )
 }

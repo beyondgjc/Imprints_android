@@ -461,6 +461,8 @@
     <string name="review_need_content">写点什么，或至少关联一条记录</string>
     <string name="review_title_optional">标题（可不填）</string>
     <string name="review_this_time">回顾这段时光</string>
+    <string name="review_period_entries">这段时间的印迹　%1$d 条</string>
+    <string name="review_period_empty">这个范围里还没有印迹</string>
     <string name="review_source_gone">原印迹已删除或不可用</string>
     <string name="review_as_of_today">截至今天</string>
     <string name="review_included_count">已纳入 %1$d 条</string>
