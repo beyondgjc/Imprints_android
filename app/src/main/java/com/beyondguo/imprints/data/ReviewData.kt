@@ -59,6 +59,21 @@ data class ReviewEntity(
  * `visibility` 由来源的删除状态派生：来源进回收站 → RECYCLED（内容立即隐藏但行保留），
  * 彻底删除 → PURGED（快照正文与媒体引用清空，只留无内容占位）。
  */
+/**
+ * 总结与普通印迹的关联。
+ *
+ * **V0.2 起：只写 `reviewId` / `sourceKind` / `sourceId` / `featuredOrder`（当排序用）/
+ * `createdAtMs`，其余字段一律留空、也不再读取。**
+ * 原印迹始终只有一份业务数据，总结显示时现读原印迹最新内容 —— 因此没有「刷新预览」这一步，
+ * 用户改动原印迹，关联卡片与概况自动跟着变。
+ *
+ * 为什么不把这些列从表里删掉：`review_source_media` 对本表有复合外键，
+ * 重建主表要连带处理从表（`defer_foreign_keys` 或一并重建），
+ * 收益只是省几个不再读写的列，风险不成正比。留着的列在代码里视为废弃。
+ *
+ * 注意 `sourceId` **故意没有外键**：来源被删除后要保留一条「失效占位」，
+ * 建了外键就会随 entries 级联删掉关联，用户再也看不到"原印迹已删除"这条记录。
+ */
 @Entity(
     tableName = "review_sources",
     primaryKeys = ["reviewId", "sourceKind", "sourceId"],
@@ -67,21 +82,29 @@ data class ReviewEntity(
 )
 data class ReviewSourceEntity(
     val reviewId: String,
+    /** 首版只有 ENTRY；邮件不再作为回顾素材，也不建立总结与邮件的持久关联 */
     val sourceKind: String,
     val sourceId: String,
-    /** 来源版本指纹（updatedAtMs），用于「来源记录有变化」提示 */
-    val sourceUpdatedAtMs: Long,
-    /** 来源内容摘要指纹，用于区分「只是改了时间戳」与「正文/媒体真的变了」 */
-    val contentHash: String,
-    /** 来源事件日期（ISO yyyy-MM-dd）；信件取约定送达日期 */
-    val eventDate: String,
+    /** 废弃：旧版来源版本指纹，V0.2 不再写入 */
+    val sourceUpdatedAtMs: Long = 0L,
+    /** 废弃：旧版内容摘要指纹，V0.2 不再写入 */
+    val contentHash: String = "",
+    /** 废弃：旧版事件日期快照，改为现读原印迹 */
+    val eventDate: String = "",
+    /** 废弃：旧版「纳入统计」双选，V0.2 只有一套勾选 */
     val included: Boolean = true,
+    /** 废弃：旧版「精选片段」双选 */
     val featured: Boolean = false,
+    /** 复用为展示顺序（升序）；旧名保留以免动表结构 */
     val featuredOrder: Int = 0,
+    /** 废弃：旧版标题快照 */
     val titleSnapshot: String = "",
+    /** 废弃：旧版正文快照 */
     val bodySnapshot: String = "",
+    /** 废弃：旧版标签快照 */
     val tagSnapshot: String = "",
-    val visibility: String = SourceVisibility.VISIBLE.name,
+    /** 废弃：旧版可见性派生列，改为查询时按原印迹状态现算 */
+    val visibility: String = "VISIBLE",
     val createdAtMs: Long,
 )
 

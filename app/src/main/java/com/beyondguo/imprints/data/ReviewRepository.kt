@@ -173,9 +173,65 @@ class ReviewRepository(
 
     suspend fun detail(id: String): ReviewDetail? {
         val review = mailDao.review(id) ?: return null
-        val sources = mailDao.sources(id)
-        val media = mailDao.sourceMedia(id)
+        // V0.2：库里不再存内容副本，一律用原印迹的**当前数据**填充视图字段。
+        // enrich 只在内存里填空位，不回写数据库 —— 所以原印迹一改，总结立刻显示最新值，
+        // 「刷新预览」这一步也就不需要了。
+        val sources = mailDao.sources(id).map { enrich(it) }
+        val media = sources.flatMap { mediaOf(it) }
         return ReviewDetail(review, sources, media, statsOf(sources, media))
+    }
+
+    /** 用原印迹当前数据填充来源行；来源已进回收站/被彻底删除时清空内容，只留占位。 */
+    private suspend fun enrich(row: ReviewSourceEntity): ReviewSourceEntity {
+        val entry = dao.entry(row.sourceId)
+            ?: return blanked(row, SourceVisibility.PURGED)
+        if (entry.deletedAtMs != null) return blanked(row, SourceVisibility.RECYCLED)
+        val tagRows = dao.tagsOnce()
+        val names = dao.tagsOf(entry.id).mapNotNull { id -> tagRows.firstOrNull { it.id == id }?.name }
+        return row.copy(
+            sourceUpdatedAtMs = entry.updatedAtMs,
+            eventDate = entry.eventLocalMinute.take(10),
+            bodySnapshot = entry.body,
+            tagSnapshot = names.joinToString(","),
+            visibility = SourceVisibility.VISIBLE.name,
+        )
+    }
+
+    private fun blanked(row: ReviewSourceEntity, visibility: SourceVisibility) = row.copy(
+        titleSnapshot = "", bodySnapshot = "", tagSnapshot = "", eventDate = "",
+        visibility = visibility.name,
+    )
+
+    /**
+     * 现读原印迹的媒体，不从 `review_source_media` 取（那张表 V0.2 起不再写入）。
+     * id 用确定性拼接而不是随机 UUID —— UI 会拿它做 key，每次变会导致无谓重组。
+     */
+    private suspend fun mediaOf(row: ReviewSourceEntity): List<ReviewSourceMediaEntity> {
+        if (row.visibility != SourceVisibility.VISIBLE.name) return emptyList()
+        fun id(role: String, ordinal: Int) = "${row.reviewId}:${row.sourceId}:$role:$ordinal"
+        val visuals = dao.visuals(row.sourceId)
+        val audio = dao.audio(row.sourceId)
+        return visuals.flatMapIndexed { index, v ->
+            listOfNotNull(
+                ReviewSourceMediaEntity(
+                    id("VISUAL", index), row.reviewId, row.sourceKind, row.sourceId, "VISUAL", index,
+                    v.relativePath, v.kind, v.mime, v.byteLength, v.sha256,
+                ),
+                v.motionVideoPath?.let { path ->
+                    ReviewSourceMediaEntity(
+                        id("MOTION", index), row.reviewId, row.sourceKind, row.sourceId, "MOTION", index,
+                        path, "VIDEO", "video/mp4", v.motionVideoByteLength ?: 0L, v.motionVideoSha256 ?: "",
+                    )
+                },
+            )
+        } + listOfNotNull(
+            audio?.let {
+                ReviewSourceMediaEntity(
+                    id("AUDIO", 0), row.reviewId, row.sourceKind, row.sourceId, "AUDIO", 0,
+                    it.relativePath, "AUDIO", it.mime, it.byteLength, it.sha256,
+                )
+            },
+        )
     }
 
     private fun statsOf(sources: List<ReviewSourceEntity>, media: List<ReviewSourceMediaEntity>): ReviewStats {
@@ -222,7 +278,10 @@ class ReviewRepository(
         val keys = draft.includedKeys.mapNotNull(SourceKey::parse).distinct()
         val featuredOrder = draft.featuredKeys.mapIndexedNotNull { index, key -> SourceKey.parse(key)?.let { it to index } }.toMap()
 
-        val snapshots = keys.map { key -> buildSnapshot(reviewId, key, featuredOrder[key], now, range) }
+        // V0.2：只存关联关系与顺序，不复制正文／标签／媒体（内容一律现读原印迹）
+        val rows = keys.mapIndexed { index, key ->
+            buildSourceRow(reviewId, key, featuredOrder[key] ?: index, now)
+        }
         val tagRows = dao.tagsOnce()
         val tagSnapshotNames = draft.selectedTagIds.joinToString(",") { id -> tagRows.firstOrNull { it.id == id }?.name ?: id }
 
@@ -247,15 +306,39 @@ class ReviewRepository(
             )
             mailDao.deleteSources(reviewId)
             mailDao.deleteSourceMedia(reviewId)
-            snapshots.forEach { (source, media) ->
-                mailDao.upsertSource(source)
-                if (media.isNotEmpty()) mailDao.insertSourceMedia(media)
-            }
-            val ownedPaths = snapshots.flatMap { (_, media) -> media.map { it.relativePath } }
-            core.registerMediaOwner(OWNER_REVIEW, reviewId, ownedPaths)
+            rows.forEach { mailDao.upsertSource(it) }
+            // 不再写 review_source_media、也不再注册媒体所有权：附件始终归原印迹所有
         }
         draft.draftId?.let { mailDao.deleteDraft(it) }
         reviewId
+    }
+
+    /**
+     * 校验来源资格并生成关联行。
+     *
+     * V0.2：关联只存稳定 ID 与顺序，**不复制正文/标签/媒体** —— 所以这里只判断"能不能关联"。
+     * 邮件（LETTER）自 V0.2 起不再是回顾素材，直接拒绝。
+     */
+    private suspend fun buildSourceRow(
+        reviewId: String,
+        key: SourceKey,
+        order: Int,
+        nowMs: Long,
+    ): ReviewSourceEntity {
+        when (key.kind) {
+            SourceKind.ENTRY.name -> {
+                val entry = dao.entry(key.id) ?: error("来源印迹已不存在")
+                check(entry.deletedAtMs == null) { "回收站中的印迹不能纳入总结" }
+            }
+            else -> error("只有普通印迹可以作为回顾来源")
+        }
+        return ReviewSourceEntity(
+            reviewId = reviewId,
+            sourceKind = key.kind,
+            sourceId = key.id,
+            featuredOrder = order,
+            createdAtMs = nowMs,
+        )
     }
 
     /** 构建一条来源快照：冻结正文/标签/媒体引用，并记下来源版本指纹。 */
@@ -410,51 +493,42 @@ class ReviewRepository(
     ): Unit = core.exclusive {
         val review = mailDao.review(reviewId) ?: error("总结已不存在")
         val now = System.currentTimeMillis()
-        val featuredOrder = mailDao.sources(reviewId).filter { it.featured }.associate { it.toString() to it.featuredOrder }
+        var nextOrder = (mailDao.sources(reviewId).maxOfOrNull { it.featuredOrder } ?: -1) + 1
         database.withTransaction {
+            // 新增：只写关联关系，不复制内容
             preview.added.filter { it.toString() in addKeys }.forEach { candidate ->
-                val (source, media) = buildSnapshot(reviewId, candidate.key, featuredOrder[candidate.key.toString()], now, range)
-                mailDao.upsertSource(source)
-                if (media.isNotEmpty()) mailDao.insertSourceMedia(media)
+                mailDao.upsertSource(buildSourceRow(reviewId, candidate.key, nextOrder++, now))
             }
-            preview.changed.filter { (source, _) -> source.toString() in refreshKeys }.forEach { (source, candidate) ->
-                val (fresh, media) = buildSnapshot(reviewId, candidate.key, null, now, range)
-                // 只更新内容快照与指纹，保留用户的选择与排序
-                mailDao.upsertSource(
-                    fresh.copy(
-                        included = source.included,
-                        featured = source.featured,
-                        featuredOrder = source.featuredOrder,
-                        visibility = source.visibility,
-                        createdAtMs = source.createdAtMs,
-                    ),
-                )
-                mailDao.deleteSourceMediaIn(reviewId, candidate.key.kind, candidate.key.id)
-                if (media.isNotEmpty()) mailDao.insertSourceMedia(media)
-            }
+            // 变化的来源不需要任何处理：内容本来就是现读原印迹的（V0.2 取消「刷新预览」）
+            // 移除：直接删掉关系行，原印迹不动
             preview.removed.filter { it.toString() in removeKeys }.forEach { source ->
                 mailDao.deleteSourceMediaIn(reviewId, source.sourceKind, source.sourceId)
-                mailDao.upsertSource(source.copy(visibility = SourceVisibility.PURGED.name, titleSnapshot = "", bodySnapshot = "", tagSnapshot = "", contentHash = ""))
+                mailDao.deleteSourceRow(reviewId, source.sourceKind, source.sourceId)
             }
-            val ownedPaths = mailDao.sourceMedia(reviewId).map { it.relativePath }
-            core.registerMediaOwner(OWNER_REVIEW, reviewId, ownedPaths)
             mailDao.upsertReview(review.copy(updatedAtMs = now, snapshotRevision = review.snapshotRevision + 1))
         }
         Unit
     }
 
-    /** 主动把一封已读信加入指定总结（ML-05/RV-05）；逐条、显式来源标识。 */
-    suspend fun addLetterSource(reviewId: String, letterEntryId: String): Unit = core.exclusive {
+    /**
+     * 已废止（V0.2）。
+     *
+     * 邮件不再作为回顾素材：规格明确「全部邮件均排除在回顾素材之外」，
+     * 也不再建立总结与邮件的持久关联。保留这个函数只是为了给旧调用方一个明确的错误，
+     * 而不是静默写入一条不该存在的来源。UI 侧入口会在下一轮一并移除。
+     */
+    suspend fun addLetterSource(reviewId: String, letterEntryId: String): Unit =
+        error("邮件不能作为回顾素材：请在「回顾这段时光」里按日期范围创建普通回顾")
+
+    /** 主动把一封已读信加入指定总结 —— 旧实现，保留待删。 */
+    private suspend fun addLetterSourceLegacy(reviewId: String, letterEntryId: String): Unit = core.exclusive {
         val review = mailDao.review(reviewId) ?: error("总结已不存在")
-        val range = DateRange(ReviewPeriods.parseDate(review.startLocalDate), ReviewPeriods.parseDate(review.endLocalDateInclusive))
         val now = System.currentTimeMillis()
         val existing = mailDao.sourcesOf(SourceKind.LETTER.name, letterEntryId).any { it.reviewId == reviewId }
         if (existing) return@exclusive
-        val (source, media) = buildSnapshot(reviewId, SourceKey(SourceKind.LETTER.name, letterEntryId), null, now, range)
+        val source = buildSourceRow(reviewId, SourceKey(SourceKind.LETTER.name, letterEntryId), 0, now)
         database.withTransaction {
             mailDao.upsertSource(source)
-            if (media.isNotEmpty()) mailDao.insertSourceMedia(media)
-            core.registerMediaOwner(OWNER_REVIEW, reviewId, mailDao.sourceMedia(reviewId).map { it.relativePath })
             mailDao.upsertReview(review.copy(updatedAtMs = now))
         }
         Unit

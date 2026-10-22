@@ -200,6 +200,10 @@ interface MailReviewDao {
     @Query("DELETE FROM review_sources WHERE reviewId = :reviewId")
     suspend fun deleteSources(reviewId: String)
 
+    /** 解除单条关联（用户移除某个来源）。只删关系行，原印迹不受影响。 */
+    @Query("DELETE FROM review_sources WHERE reviewId = :reviewId AND sourceKind = :kind AND sourceId = :sourceId")
+    suspend fun deleteSourceRow(reviewId: String, kind: String, sourceId: String)
+
     @Query("DELETE FROM review_source_media WHERE reviewId = :reviewId")
     suspend fun deleteSourceMedia(reviewId: String)
 
