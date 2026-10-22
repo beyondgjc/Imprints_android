@@ -82,6 +82,9 @@ import java.time.LocalDate
 
 // ---------- 回顾一级页 ----------
 
+/** 回顾一级页的两个分栏：已保存总结 / 未发布的草稿。 */
+private enum class ReviewHomeTab { SAVED, DRAFTS }
+
 @Composable
 fun ReviewHomePage(
     reviewRepository: ReviewRepository,
@@ -224,13 +227,38 @@ fun ReviewHomePage(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 8.dp),
         ) { Text(stringResource(R.string.review_create)) }
 
+        // 与时光邮箱一致的 tab 形态：已保存的总结 / 草稿分开看，不再把草稿平铺在总结上面。
+        // 草稿清空后自动回到「我的总结」，避免停在一个已经不存在的标签上。
+        var homeTab by remember { mutableStateOf(ReviewHomeTab.SAVED) }
+        LaunchedEffect(drafts.size) {
+            if (drafts.isEmpty() && homeTab == ReviewHomeTab.DRAFTS) homeTab = ReviewHomeTab.SAVED
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TagChip(
+                text = stringResource(R.string.review_mine) + " " + reviews.size,
+                selected = homeTab == ReviewHomeTab.SAVED,
+                onClick = { homeTab = ReviewHomeTab.SAVED },
+            )
+            // 没有草稿时不显示草稿标签
+            if (drafts.isNotEmpty()) {
+                TagChip(
+                    text = stringResource(R.string.review_tab_drafts) + " " + drafts.size,
+                    selected = homeTab == ReviewHomeTab.DRAFTS,
+                    onClick = { homeTab = ReviewHomeTab.DRAFTS },
+                )
+            }
+        }
+
         LazyColumn(
             Modifier.fillMaxSize().padding(horizontal = 22.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(bottom = 32.dp),
         ) {
-            if (drafts.isNotEmpty()) {
-                item { Text(stringResource(R.string.mail_draft_badge, drafts.size), color = Quiet, fontSize = 13.sp) }
+            if (homeTab == ReviewHomeTab.DRAFTS) {
                 items(drafts, key = { "draft-" + it.id }) { draft ->
                     OutlinePanel(Modifier.fillMaxWidth().clickable { onOpenDraft(draft.id) }) {
                         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -245,14 +273,14 @@ fun ReviewHomePage(
                         }
                     }
                 }
-            }
-            item { Text(stringResource(R.string.review_mine), color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold) }
-            if (reviews.isEmpty()) {
-                item {
-                    Column(Modifier.fillMaxWidth().padding(top = 24.dp), horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(stringResource(R.string.review_empty), color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                        Text(stringResource(R.string.review_empty_sub), color = Quiet, fontSize = 13.sp)
+            } else {
+                if (reviews.isEmpty()) {
+                    item {
+                        Column(Modifier.fillMaxWidth().padding(top = 24.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(stringResource(R.string.review_empty), color = Ink, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(R.string.review_empty_sub), color = Quiet, fontSize = 13.sp)
+                        }
                     }
                 }
             }
@@ -1044,6 +1072,9 @@ fun ReviewEditorPage(
     }
 
     fun saveDraftQuietly() {
+        // 标题和正文都没写就不落草稿：否则点一下「创建回顾」再退出，
+        // 每次都会攒出一个空草稿，回顾页的草稿数会一路上涨。
+        if (title.isBlank() && body.isBlank()) return
         val draft = buildDraft() ?: return
         scope.launch { runCatching { reviewRepository.saveDraft(draftId, draft) } }
     }

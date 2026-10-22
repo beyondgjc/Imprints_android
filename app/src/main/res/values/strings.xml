@@ -464,6 +464,7 @@
     <string name="review_period_entries">这段时间的印迹　%1$d 条</string>
     <string name="review_period_empty">这个范围里还没有印迹</string>
     <string name="review_view_all">查看 ›</string>
+    <string name="review_tab_drafts">草稿</string>
     <string name="review_source_gone">原印迹已删除或不可用</string>
     <string name="review_as_of_today">截至今天</string>
     <string name="review_included_count">已纳入 %1$d 条</string>
