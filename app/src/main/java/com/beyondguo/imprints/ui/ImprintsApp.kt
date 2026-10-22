@@ -1311,18 +1311,25 @@ private fun SettingsPage(
                 )
                 FineDivider()
                 // 进程被杀后仍能送达：需要电池优化白名单（MIUI 未豁免会丢弃精确闹钟）。
-                // 已豁免时整行不再可点 —— 状态已经写在 subtitle 里，没有可做的事就不要给点击态，
-                // 否则用户点一下弹一次提示，纯噪音。
-                val exempt = remember { com.beyondguo.imprints.mail.LetterBackgroundPolicy.isExempt(context) }
+                //
+                // 这一行**永远可点**，按状态分流 —— 设置里的条目必须是有效操作：
+                //   未豁免 → 弹系统「允许后台运行」请求框；
+                //   已豁免 → 打开系统应用信息页（能关掉、也能开 MIUI 自启动）。
+                // 之所以不是 Switch：电池优化豁免只有申请 API、没有撤销 API，
+                // 开关状态完全由系统决定，做成 Switch 会出现"拨过去又弹回"的假象。
+                // 不用 remember：从系统页返回时需要反映最新状态。
+                val exempt = com.beyondguo.imprints.mail.LetterBackgroundPolicy.isExempt(context)
                 SettingsRow(
                     title = stringResource(R.string.settings_background),
                     subtitle = stringResource(
                         if (exempt) R.string.settings_background_on else R.string.settings_background_off,
                     ),
-                    onClick = if (exempt) {
-                        null
-                    } else {
-                        { com.beyondguo.imprints.mail.LetterBackgroundPolicy.requestExemption(context) }
+                    onClick = {
+                        if (exempt) {
+                            com.beyondguo.imprints.mail.LetterBackgroundPolicy.openAppDetails(context)
+                        } else {
+                            com.beyondguo.imprints.mail.LetterBackgroundPolicy.requestExemption(context)
+                        }
                     },
                 )
                 FineDivider()

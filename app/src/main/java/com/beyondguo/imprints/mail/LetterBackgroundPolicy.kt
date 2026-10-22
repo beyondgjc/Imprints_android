@@ -55,4 +55,31 @@ object LetterBackgroundPolicy {
             )
         }
     }
+
+    /**
+     * 打开本应用在系统里的信息页。
+     *
+     * 为什么需要它：电池优化豁免**只有申请 API、没有撤销 API**，所以"已豁免后想关掉或检查"
+     * 只能把用户送到系统页。MIUI 的这个页面还带「自启动」开关与「电量消耗」（省电策略），
+     * 是真正能调整后台存活能力的地方。
+     * 拿不到应用详情页时退回到电池优化列表。
+     */
+    fun openAppDetails(context: Context) {
+        val opened = runCatching {
+            context.startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    .setData(Uri.parse("package:${context.packageName}"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+            true
+        }.getOrDefault(false)
+        if (!opened) {
+            runCatching {
+                context.startActivity(
+                    Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+        }
+    }
 }
