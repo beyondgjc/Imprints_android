@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -68,6 +69,7 @@ import com.beyondguo.imprints.data.ReviewCandidate
 import com.beyondguo.imprints.data.ReviewDetail
 import com.beyondguo.imprints.data.ReviewDraft
 import com.beyondguo.imprints.data.ReviewEntity
+import com.beyondguo.imprints.data.MediaFiles
 import com.beyondguo.imprints.data.ReviewRepository
 import com.beyondguo.imprints.data.SourceKey
 import com.beyondguo.imprints.data.SourceKind
@@ -283,7 +285,6 @@ fun ReviewHomePage(
                         }
                     }
                 }
-            }
             items(reviews, key = { "review-" + it.id }) { review ->
                 OutlinePanel(Modifier.fillMaxWidth().clickable { onOpenReview(review.id) }) {
                     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -294,6 +295,7 @@ fun ReviewHomePage(
                         )
                     }
                 }
+            }
             }
         }
     }
@@ -1028,6 +1030,7 @@ private fun ReviewDatePickerDialog(
 @Composable
 fun ReviewEditorPage(
     reviewRepository: ReviewRepository,
+    files: MediaFiles,
     initialDraft: ReviewDraft?,
     draftId: String,
     onSaved: (String) -> Unit,
@@ -1181,7 +1184,7 @@ fun ReviewEditorPage(
         },
     )
 
-    if (showEntries) ReviewEntriesSheet(candidates) { showEntries = false }
+    if (showEntries) ReviewEntriesSheet(candidates, files) { showEntries = false }
 }
 
 /**
@@ -1192,25 +1195,52 @@ fun ReviewEditorPage(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ReviewEntriesSheet(candidates: List<ReviewCandidate>, onDismiss: () -> Unit) {
+private fun ReviewEntriesSheet(candidates: List<ReviewCandidate>, files: MediaFiles, onDismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp)) {
+        // 七成屏：比默认的半屏能看到更多记录，同时上方还留着编辑页的上下文
+        Column(Modifier.fillMaxWidth().fillMaxHeight(0.7f).padding(horizontal = 22.dp)) {
             Text(
                 stringResource(R.string.review_period_entries, candidates.size),
-                color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(bottom = 4.dp),
+                color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(bottom = 6.dp),
             )
             LazyColumn(
-                Modifier.fillMaxWidth().heightIn(max = 520.dp),
+                Modifier.fillMaxWidth().weight(1f),
                 contentPadding = PaddingValues(bottom = 32.dp),
             ) {
                 items(candidates, key = { it.entry.id }) { candidate ->
-                    Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
-                        Text(candidate.entry.eventLocalMinute.replace('T', ' '), color = Quiet, fontSize = 12.sp)
-                        Text(
-                            candidate.entry.body.ifBlank { stringResource(R.string.entry_media_only) },
-                            color = Ink, fontSize = 14.sp, maxLines = 3, overflow = TextOverflow.Ellipsis,
-                        )
+                    // 视觉对齐时间线：大号「日」+ 时刻 + 正文 + 首图缩略
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 13.dp),
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    candidate.entry.eventLocalMinute.substring(8, 10),
+                                    color = Ink, fontSize = 26.sp, fontWeight = FontWeight.Bold,
+                                )
+                                Text(
+                                    candidate.entry.eventLocalMinute.takeLast(5),
+                                    color = Quiet, fontSize = 13.sp,
+                                )
+                            }
+                            if (candidate.entry.body.isNotBlank()) {
+                                Text(
+                                    candidate.entry.body,
+                                    color = Ink, fontSize = 16.sp, lineHeight = 24.sp,
+                                    maxLines = 4, overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        candidate.coverPath?.let { path ->
+                            MediaThumbnail(
+                                files.resolve(path),
+                                candidate.coverKind ?: "IMAGE",
+                                Modifier.size(78.dp).clip(RoundedCornerShape(8.dp)),
+                            )
+                        }
                     }
                 }
             }

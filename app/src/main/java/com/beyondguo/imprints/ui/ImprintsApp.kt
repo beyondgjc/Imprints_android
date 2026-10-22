@@ -836,6 +836,7 @@ fun ImprintsApp(
                 )
                 is Page.ReviewWizard -> ReviewEditorPage(
                     reviewRepository = reviewRepository,
+                    files = repository.files,
                     initialDraft = wizardDraft,
                     draftId = current.draftId,
                     onSaved = { id ->

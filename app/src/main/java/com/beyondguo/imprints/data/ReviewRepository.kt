@@ -35,6 +35,9 @@ data class ReviewCandidate(
     val tagIds: List<String>,
     /** 主媒体数量；动态照片主图＋附属视频合计计 1 */
     val visualCount: Int,
+    /** 首张主图的相对路径与类型，用于回顾里的缩略图预览（可为空） */
+    val coverPath: String? = null,
+    val coverKind: String? = null,
 ) {
     val key: SourceKey get() = SourceKey(SourceKind.ENTRY.name, entry.id)
 }
@@ -152,7 +155,12 @@ class ReviewRepository(
         return entries.mapNotNull { entry ->
             val tagIdsOfEntry = tagsByEntry[entry.id].orEmpty()
             if (tagIds.isNotEmpty() && tagIdsOfEntry.none { it in tagIds }) return@mapNotNull null
-            ReviewCandidate(entry, tagIdsOfEntry, dao.visuals(entry.id).size)
+            val visuals = dao.visuals(entry.id)
+            ReviewCandidate(
+                entry, tagIdsOfEntry, visuals.size,
+                coverPath = visuals.firstOrNull()?.relativePath,
+                coverKind = visuals.firstOrNull()?.kind,
+            )
         }
     }
 
