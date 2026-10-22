@@ -2,6 +2,7 @@ package com.beyondguo.imprints.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +21,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -28,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -90,6 +95,9 @@ fun ReviewHomePage(
     var weekEntryCount by remember { mutableStateOf(0) }
     var customStart by remember { mutableStateOf(nowDate.minusMonths(1).toString()) }
     var customEnd by remember { mutableStateOf(nowDate.toString()) }
+    // 自选范围用日期选择器，不再让用户手敲 "2026-09-22"（格式错一个字符就整段回退）
+    var showStartPicker by remember { mutableStateOf(false) }
+    var showEndPicker by remember { mutableStateOf(false) }
 
     LaunchedEffect(nowDate) {
         runCatching { reviewRepository.candidates(ReviewPeriods.weekOf(nowDate), emptySet()) }
@@ -169,20 +177,31 @@ fun ReviewHomePage(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                OutlinedTextField(
-                    customStart, { customStart = it }, singleLine = true, modifier = Modifier.weight(1f),
-                    label = { Text(stringResource(R.string.review_step_range)) },
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green),
+                ReviewDateField(
+                    label = stringResource(R.string.review_step_range),
+                    value = customStart,
+                    onClick = { showStartPicker = true },
+                    modifier = Modifier.weight(1f),
                 )
-                OutlinedTextField(
-                    customEnd, { customEnd = it }, singleLine = true, modifier = Modifier.weight(1f),
-                    label = { Text(stringResource(R.string.review_as_of_today)) },
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green),
+                ReviewDateField(
+                    label = stringResource(R.string.review_as_of_today),
+                    value = customEnd,
+                    onClick = { showEndPicker = true },
+                    modifier = Modifier.weight(1f),
                 )
             }
         }
+
+        if (showStartPicker) ReviewDatePickerDialog(
+            initial = runCatching { LocalDate.parse(customStart) }.getOrDefault(nowDate),
+            onDismiss = { showStartPicker = false },
+            onPick = { customStart = it.toString(); showStartPicker = false },
+        )
+        if (showEndPicker) ReviewDatePickerDialog(
+            initial = runCatching { LocalDate.parse(customEnd) }.getOrDefault(nowDate),
+            onDismiss = { showEndPicker = false },
+            onPick = { customEnd = it.toString(); showEndPicker = false },
+        )
 
         Button(
             onClick = { onStartWizard(kind, range.start.toString(), range.endInclusive.toString(), emptyList()) },
@@ -899,5 +918,58 @@ fun ReviewDetailPage(
             },
             confirmButton = { TextButton(onClick = { showAddLetter = false }) { Text(stringResource(R.string.action_cancel)) } },
         )
+    }
+}
+
+/**
+ * 回顾「自选」范围的日期字段：只读展示，点击弹日期选择器。
+ *
+ * 不用输入框的原因：手敲 "2026-09-22" 只要格式差一个字符，range 解析就失败、整段静默回退到
+ * 最近一个自然月，用户完全不知道自己填错了；手机上弹数字键盘选日期本身也别扭。
+ */
+@Composable
+private fun ReviewDateField(label: String, value: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Column(modifier) {
+        Text(label, color = Quiet, fontSize = 11.sp, maxLines = 1)
+        Spacer(Modifier.height(4.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .border(1.dp, Line, RoundedCornerShape(12.dp))
+                .clickable(onClick = onClick)
+                .padding(horizontal = 14.dp, vertical = 14.dp),
+        ) {
+            Text(value, color = Ink, fontSize = 15.sp)
+        }
+    }
+}
+
+/**
+ * Material3 日期选择器。
+ * 注意 DatePicker 的毫秒值以 **UTC 零点** 为基准，进出一律按 UTC 换算，
+ * 否则东八区会整体偏一天。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ReviewDatePickerDialog(
+    initial: java.time.LocalDate,
+    onDismiss: () -> Unit,
+    onPick: (java.time.LocalDate) -> Unit,
+) {
+    val state = rememberDatePickerState(
+        initialSelectedDateMillis = initial.atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli(),
+    )
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = {
+                state.selectedDateMillis?.let { ms ->
+                    onPick(java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneOffset.UTC).toLocalDate())
+                }
+            }) { Text(stringResource(R.string.action_confirm)) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } },
+    ) {
+        DatePicker(state = state, showModeToggle = false)
     }
 }
