@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  空心五角星（Material Icons 的 star_border 路径）。
+  存在的理由：material-icons-core 只提供 filled/Star 和 outlined/Star，
+  而后者轮廓偏粗、跟实心星几乎看不出区别；底栏「回顾」需要真正的线框中空效果。
+  两个子路径方向相反，nonZero 规则下中间会自动挖空。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M22,9.24l-7.19,-0.62L12,2 9.19,8.63 2,9.24l5.46,4.73L5.82,21 12,17.27 18.18,21l-1.63,-7.03L22,9.24zM12,15.4l-3.76,2.27 1,-4.28 -3.32,-2.88 4.38,-0.38L12,6.1l1.71,4.04 4.38,0.38 -3.32,2.88 1,4.28L12,15.4z" />
+</vector>

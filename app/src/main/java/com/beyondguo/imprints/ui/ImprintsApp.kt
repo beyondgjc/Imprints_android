@@ -84,6 +84,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.net.Uri
 import com.beyondguo.imprints.R
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 
 private sealed interface Page {
@@ -457,10 +458,12 @@ fun ImprintsApp(
                     onClick = { page = Page.Review },
                     colors = navColors,
                     icon = {
-                        Icon(
-                            if (page == Page.Review) Icons.Default.Star else Icons.Outlined.Star,
-                            stringResource(R.string.nav_review),
-                        )
+                        // Icons.Outlined.Star 轮廓太粗、几乎看不出中空，改用自绘的空心星
+                        if (page == Page.Review) {
+                            Icon(Icons.Default.Star, stringResource(R.string.nav_review))
+                        } else {
+                            Icon(painterResource(R.drawable.ic_nav_star_border), stringResource(R.string.nav_review))
+                        }
                     },
                     label = { Text(stringResource(R.string.nav_review)) },
                 )

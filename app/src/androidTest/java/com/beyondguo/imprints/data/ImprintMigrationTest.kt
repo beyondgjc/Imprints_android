@@ -13,6 +13,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -306,7 +307,10 @@ class ImprintMigrationTest {
                 assertTrue(core.searchBody("给未来的一封信").none { it.id == letterId })
                 assertEquals(ContentKind.LETTER, core.contentKind(letterId))
                 assertEquals(ContentKind.ENTRY, core.contentKind(legacyEntryId))
-                assertEquals("给未来的一封信", letters.letterDetail(letterId)?.entry?.body)
+                // V0.2：letterDetail 在数据层就拦截未到期信（送达时间是 2099），不能靠 UI 判断
+                assertNull(letters.letterDetail(letterId))
+                // 到期之后才读得到正文；这里显式把「当前时刻」推到送达之后
+                assertEquals("给未来的一封信", letters.letterDetail(letterId, Long.MAX_VALUE)?.entry?.body)
                 assertEquals(1, db.mailReviewDao().sealedLettersList().size)
 
                 // 总结可保存，且不作为普通印迹候选
