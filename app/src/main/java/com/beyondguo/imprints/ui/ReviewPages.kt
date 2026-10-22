@@ -22,6 +22,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -48,10 +50,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.beyondguo.imprints.R
@@ -1091,7 +1095,10 @@ fun ReviewEditorPage(
             )
 
             OutlinedTextField(
-                body, { body = it }, modifier = Modifier.fillMaxWidth().weight(1f),
+                body, { body = it },
+                // 用高度区间而不是 weight(1f)：weight 会把剩余空间全吃掉，
+                // 下面的「关联印迹」整行被挤到屏幕外（真机 dump 里 bounds 是 [0,0][0,0]）。
+                modifier = Modifier.fillMaxWidth().heightIn(min = 150.dp, max = 320.dp),
                 placeholder = { Text(stringResource(R.string.review_write_hint), color = Quiet) },
                 shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green),
@@ -1152,17 +1159,32 @@ private fun ReviewPickDialog(
                 LazyColumn(Modifier.heightIn(max = 420.dp)) {
                     items(candidates, key = { it.key.toString() }) { candidate ->
                         val key = candidate.key.toString()
+                        val picked = key in selected
                         Row(
-                            Modifier.fillMaxWidth().clickable { onToggle(key) }.padding(vertical = 10.dp),
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (picked) PaleGreen else androidx.compose.ui.graphics.Color.Transparent)
+                                .clickable { onToggle(key) }
+                                .padding(vertical = 4.dp, horizontal = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
-                            Text(if (key in selected) "✓" else "", color = Green, fontSize = 16.sp)
+                            Checkbox(
+                                checked = picked,
+                                onCheckedChange = { onToggle(key) },
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = Green,
+                                    uncheckedColor = Line,
+                                    checkmarkColor = androidx.compose.ui.graphics.Color.White,
+                                ),
+                            )
                             Column(Modifier.weight(1f)) {
                                 Text(candidate.entry.eventLocalMinute.replace('T', ' '), color = Quiet, fontSize = 12.sp)
                                 Text(
                                     candidate.entry.body.ifBlank { stringResource(R.string.entry_media_only) },
-                                    color = Ink, fontSize = 14.sp, maxLines = 2,
+                                    color = Ink, fontSize = 14.sp,
+                                    maxLines = 2, overflow = TextOverflow.Ellipsis,
                                 )
                             }
                         }
