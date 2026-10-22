@@ -162,6 +162,23 @@ fun MailHomePage(
             .sortedWith(compareByDescending<LetterListRow> { it.deliverAtMs }.thenByDescending { it.entryId })
     }
     val unreadCount = delivered.count { it.deliveryReadAtMs == null }
+    // 新信到达时**只在用户本来就停在顶部**才跟随到最新。
+    //
+    // 注意不能判断 firstVisibleItemIndex == 0：列表按 entryId 做 key，新信插入头部时
+    // LazyList 会锚住原来那个可见项，index 会从 0 变成 1 —— 等这里执行时，
+    // 「本来在顶部」的用户看起来已经"不在顶部"了。
+    // 正确判据：当前第一个可见项是不是「上一次的最新那封」，是就说明用户正看着顶部。
+    var previousNewestId by remember { mutableStateOf<String?>(null) }
+    val newestDeliveredId = delivered.firstOrNull()?.entryId
+    LaunchedEffect(newestDeliveredId) {
+        val previous = previousNewestId
+        previousNewestId = newestDeliveredId
+        if (newestDeliveredId == null || previous == null || previous == newestDeliveredId) {
+            return@LaunchedEffect
+        }
+        val firstVisibleKey = deliveredListState.layoutInfo.visibleItemsInfo.firstOrNull()?.key
+        if (firstVisibleKey == previous) deliveredListState.scrollToItem(0)
+    }
     // 「只看未读」在未读清零后必须自动失效：那一刻 chip 本身也会隐藏，
     // 用户没有别的方式关掉筛选，否则会卡在一个永远空的列表里。
     val filteringUnread = showUnreadOnly && unreadCount > 0

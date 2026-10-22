@@ -1022,7 +1022,15 @@ fun ImprintsApp(
             title = { Text(stringResource(R.string.letter_add_to_review)) },
             text = {
                 Column {
-                    if (reviews.isEmpty()) Text(stringResource(R.string.review_empty_sub), color = Quiet, fontSize = 13.sp)
+                    if (reviews.isEmpty()) {
+                        // 不能复用回顾列表页的空态文案（「换个时间范围，或直接写总结」）：
+                        // 那会承诺一个这里根本没有的入口，是个死胡同。这里必须给出出路。
+                        Text(stringResource(R.string.mail_add_review_empty), color = Quiet, fontSize = 13.sp)
+                        TextButton(onClick = {
+                            addLetterToReviewFor = null
+                            page = Page.Review
+                        }) { Text(stringResource(R.string.review_go_create)) }
+                    }
                     reviews.forEach { review ->
                         TextButton(onClick = {
                             addLetterToReviewFor = null

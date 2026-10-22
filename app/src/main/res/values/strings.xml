@@ -480,6 +480,8 @@
     <string name="review_write_letter">给下一阶段的自己写信</string>
     <string name="review_empty">还没有可回顾的记录</string>
     <string name="review_empty_sub">换个时间范围，或直接写总结</string>
+    <string name="mail_add_review_empty">还没有总结。先创建一个，再把这封信加进去。</string>
+    <string name="review_go_create">去创建总结</string>
     <string name="review_direct_write">直接写总结</string>
     <string name="review_delete_hint">删除总结不会删除来源印迹或信件</string>
     <string name="review_existing_title">该范围已有总结</string>
