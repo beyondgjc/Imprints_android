@@ -1310,14 +1310,20 @@ private fun SettingsPage(
                     onClick = { com.beyondguo.imprints.mail.LetterBackgroundPolicy.openNotificationSettings(context) },
                 )
                 FineDivider()
-                // 进程被杀后仍能送达：需要电池优化白名单（MIUI 未豁免会丢弃精确闹钟）
+                // 进程被杀后仍能送达：需要电池优化白名单（MIUI 未豁免会丢弃精确闹钟）。
+                // 已豁免时整行不再可点 —— 状态已经写在 subtitle 里，没有可做的事就不要给点击态，
+                // 否则用户点一下弹一次提示，纯噪音。
                 val exempt = remember { com.beyondguo.imprints.mail.LetterBackgroundPolicy.isExempt(context) }
                 SettingsRow(
                     title = stringResource(R.string.settings_background),
                     subtitle = stringResource(
                         if (exempt) R.string.settings_background_on else R.string.settings_background_off,
                     ),
-                    onClick = { com.beyondguo.imprints.mail.LetterBackgroundPolicy.requestExemption(context) },
+                    onClick = if (exempt) {
+                        null
+                    } else {
+                        { com.beyondguo.imprints.mail.LetterBackgroundPolicy.requestExemption(context) }
+                    },
                 )
                 FineDivider()
                 // 唯一的主动管理入口：低频、不附数量（产品规格 ML-02）
