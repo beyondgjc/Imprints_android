@@ -38,6 +38,8 @@ data class ReviewCandidate(
     /** 首张主图的相对路径与类型，用于回顾里的缩略图预览（可为空） */
     val coverPath: String? = null,
     val coverKind: String? = null,
+    /** 完整详情（位置 / 媒体 / 音频 / 标签），供回顾面板复用时间线的条目渲染 */
+    val detail: EntryDetail? = null,
 ) {
     val key: SourceKey get() = SourceKey(SourceKind.ENTRY.name, entry.id)
 }
@@ -160,6 +162,7 @@ class ReviewRepository(
                 entry, tagIdsOfEntry, visuals.size,
                 coverPath = visuals.firstOrNull()?.relativePath,
                 coverKind = visuals.firstOrNull()?.kind,
+                detail = core.detail(entry.id),
             )
         }
     }

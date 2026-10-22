@@ -30,6 +30,7 @@ import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -1030,7 +1031,7 @@ private fun ReviewDatePickerDialog(
 @Composable
 fun ReviewEditorPage(
     reviewRepository: ReviewRepository,
-    files: MediaFiles,
+    repository: ImprintRepository,
     initialDraft: ReviewDraft?,
     draftId: String,
     onSaved: (String) -> Unit,
@@ -1184,7 +1185,7 @@ fun ReviewEditorPage(
         },
     )
 
-    if (showEntries) ReviewEntriesSheet(candidates, files) { showEntries = false }
+    if (showEntries) ReviewEntriesSheet(candidates, repository) { showEntries = false }
 }
 
 /**
@@ -1195,53 +1196,31 @@ fun ReviewEditorPage(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ReviewEntriesSheet(candidates: List<ReviewCandidate>, files: MediaFiles, onDismiss: () -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        // 七成屏：比默认的半屏能看到更多记录，同时上方还留着编辑页的上下文
-        Column(Modifier.fillMaxWidth().fillMaxHeight(0.7f).padding(horizontal = 22.dp)) {
+private fun ReviewEntriesSheet(
+    candidates: List<ReviewCandidate>,
+    repository: ImprintRepository,
+    onDismiss: () -> Unit,
+) {
+    // skipPartiallyExpanded：ModalBottomSheet 默认打开在「半展开」，一进来只有五成屏；
+    // 跳过这个状态，配合内容的 fillMaxHeight(0.7f)，一打开就是七成屏。
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(0.7f)) {
             Text(
                 stringResource(R.string.review_period_entries, candidates.size),
                 color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 6.dp),
+                modifier = Modifier.padding(start = 22.dp, end = 22.dp, bottom = 4.dp),
             )
-            LazyColumn(
-                Modifier.fillMaxWidth().weight(1f),
-                contentPadding = PaddingValues(bottom = 32.dp),
-            ) {
+            LazyColumn(Modifier.fillMaxWidth().weight(1f), contentPadding = PaddingValues(bottom = 32.dp)) {
                 items(candidates, key = { it.entry.id }) { candidate ->
-                    // 视觉对齐时间线：大号「日」+ 时刻 + 正文 + 首图缩略
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = 13.dp),
-                        verticalAlignment = Alignment.Top,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(
-                                    candidate.entry.eventLocalMinute.substring(8, 10),
-                                    color = Ink, fontSize = 26.sp, fontWeight = FontWeight.Bold,
-                                )
-                                Text(
-                                    candidate.entry.eventLocalMinute.takeLast(5),
-                                    color = Quiet, fontSize = 13.sp,
-                                )
-                            }
-                            if (candidate.entry.body.isNotBlank()) {
-                                Text(
-                                    candidate.entry.body,
-                                    color = Ink, fontSize = 16.sp, lineHeight = 24.sp,
-                                    maxLines = 4, overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
-                        candidate.coverPath?.let { path ->
-                            MediaThumbnail(
-                                files.resolve(path),
-                                candidate.coverKind ?: "IMAGE",
-                                Modifier.size(78.dp).clip(RoundedCornerShape(8.dp)),
-                            )
-                        }
-                    }
+                    // 直接复用时间线的条目组件：两处必须长得一样，不能各写一份。
+                    // showFeeling = false —— 感受不进入回顾素材（RV-05）。
+                    TimelineEntryItem(
+                        entry = candidate.entry,
+                        detail = candidate.detail,
+                        repository = repository,
+                        showFeeling = false,
+                    )
                 }
             }
         }

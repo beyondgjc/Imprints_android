@@ -297,126 +297,16 @@ fun TimelinePage(
                 previousMonth = month
             }
             item(key = entry.id) {
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 22.dp, vertical = 15.dp)
-                        .clickable { onOpen(entry.id) },
-                    verticalArrangement = Arrangement.spacedBy(13.dp),
-                ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(entry.eventLocalMinute.substring(8, 10), color = Ink, fontSize = 30.sp, fontWeight = FontWeight.Bold)
-                            val date = runCatching { LocalDate.parse(entry.eventLocalMinute.take(10)) }.getOrNull()
-                            val weekday = date?.dayOfWeek?.value?.let { weekdayNames()[it - 1] }.orEmpty()
-                            Text(
-                                stringResource(R.string.detail_time_meta, weekday, entry.eventLocalMinute.takeLast(5)),
-                                color = Quiet, fontSize = 13.sp,
-                            )
-                            // 设计 16：位置跟在时间后同一行
-                            details[entry.id]?.place?.let { place ->
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    modifier = Modifier.clickable { onOpenPlace(place) },
-                                ) {
-                                    Icon(
-                                        Icons.Default.LocationOn,
-                                        null,
-                                        tint = Color(0xFF07C160),
-                                        modifier = Modifier.size(14.dp),
-                                    )
-                                    Text(place.name, color = Color(0xFF07C160), fontSize = 13.sp, maxLines = 1)
-                                }
-                            }
-                        }
-                        if (entry.body.isNotBlank()) {
-                            // 知乎式：截断时「展开 ∨」浮在末行右下角（背景遮罩）；
-                            // 展开后正文完整显示，「收起 ∧」另起一行右对齐，不遮盖末行文字。
-                            var expanded by rememberSaveable(entry.id) { mutableStateOf(false) }
-                            var clamped by rememberSaveable(entry.id) { mutableStateOf(false) }
-                            if (expanded) {
-                                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
-                                    Text(
-                                        entry.body,
-                                        Modifier.fillMaxWidth(),
-                                        color = Ink, fontSize = 17.sp, lineHeight = 27.sp,
-                                    )
-                                    Row(
-                                        Modifier
-                                            .clickable { expanded = false }
-                                            .padding(top = 4.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Text(
-                                            stringResource(R.string.action_collapse),
-                                            color = Green,
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Medium,
-                                        )
-                                        Icon(
-                                            Icons.Default.KeyboardArrowUp,
-                                            contentDescription = stringResource(R.string.a11y_collapse_body),
-                                            tint = Green,
-                                            modifier = Modifier.size(16.dp),
-                                        )
-                                    }
-                                }
-                            } else {
-                                Box(Modifier.fillMaxWidth()) {
-                                    Text(
-                                        entry.body,
-                                        Modifier.fillMaxWidth(),
-                                        onTextLayout = { result ->
-                                            if (result.lineCount > 0) {
-                                                clamped = result.isLineEllipsized(result.lineCount - 1)
-                                            }
-                                        },
-                                        color = Ink, fontSize = 17.sp, lineHeight = 27.sp,
-                                        maxLines = 5,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    if (clamped) {
-                                        Row(
-                                            Modifier
-                                                .align(Alignment.BottomEnd)
-                                                .background(MaterialTheme.colorScheme.background)
-                                                .clickable { expanded = true }
-                                                .padding(start = 24.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                        ) {
-                                            Text(
-                                                stringResource(R.string.action_expand),
-                                                color = Green,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.Medium,
-                                            )
-                                            Icon(
-                                                Icons.Default.KeyboardArrowDown,
-                                                contentDescription = stringResource(R.string.a11y_expand_body),
-                                                tint = Green,
-                                                modifier = Modifier.size(16.dp),
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        details[entry.id]?.let { detail ->
-                            if (detail.visuals.isNotEmpty()) MomentsMediaGrid(
-                                detail.visuals.map { v ->
-                                    MediaCell(
-                                        file = repository.files.resolve(v.relativePath),
-                                        kind = v.kind,
-                                        motionVideo = v.motionVideoPath?.let { repository.files.resolve(it) },
-                                    )
-                                },
-                                Modifier.fillMaxWidth().heightIn(max = 420.dp),
-                            )
-                            detail.audio?.let { InlineAudio(repository.files.resolve(it.relativePath)) }
-                            if (detail.feeling != null) FeelingCard(detail.feeling, repository, epoch, onUnlock, onBiometric)
-                        }
-                    FineDivider()
-                }
+                TimelineEntryItem(
+                    entry = entry,
+                    detail = details[entry.id],
+                    repository = repository,
+                    epoch = epoch,
+                    onOpen = { onOpen(entry.id) },
+                    onOpenPlace = onOpenPlace,
+                    onUnlock = onUnlock,
+                    onBiometric = onBiometric,
+                )
             }
         }
     }
@@ -1021,3 +911,146 @@ private data class BurstParticle(val color: Color, val size: Float, val dx: Floa
 
 fun RecycleCountdown(deletedAtMs: Long): String =
     EntryRules.recycleRemainingLabel(deletedAtMs, System.currentTimeMillis())
+
+/**
+ * 时间线里的一条记录。
+ *
+ * **回顾的印迹面板复用同一个组件** —— 两处必须长得一样，所以抽出来而不是各写一份。
+ * [showFeeling] 回顾里传 false：感受不进入回顾素材（RV-05）。
+ */
+@Composable
+internal fun TimelineEntryItem(
+    entry: EntryEntity,
+    detail: EntryDetail?,
+    repository: ImprintRepository,
+    epoch: Int = Int.MIN_VALUE,
+    onOpen: () -> Unit = {},
+    onOpenPlace: (PlaceEntity) -> Unit = {},
+    onUnlock: () -> Unit = {},
+    onBiometric: () -> Unit = {},
+    modifier: Modifier = Modifier,
+    showDivider: Boolean = true,
+    showFeeling: Boolean = true,
+) {
+    Column(
+        modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 22.dp, vertical = 15.dp)
+                        .clickable { onOpen() },
+                    verticalArrangement = Arrangement.spacedBy(13.dp),
+                ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(entry.eventLocalMinute.substring(8, 10), color = Ink, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                            val date = runCatching { LocalDate.parse(entry.eventLocalMinute.take(10)) }.getOrNull()
+                            val weekday = date?.dayOfWeek?.value?.let { weekdayNames()[it - 1] }.orEmpty()
+                            Text(
+                                stringResource(R.string.detail_time_meta, weekday, entry.eventLocalMinute.takeLast(5)),
+                                color = Quiet, fontSize = 13.sp,
+                            )
+                            // 设计 16：位置跟在时间后同一行
+                            detail?.place?.let { place ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    modifier = Modifier.clickable { onOpenPlace(place) },
+                                ) {
+                                    Icon(
+                                        Icons.Default.LocationOn,
+                                        null,
+                                        tint = Color(0xFF07C160),
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                    Text(place.name, color = Color(0xFF07C160), fontSize = 13.sp, maxLines = 1)
+                                }
+                            }
+                        }
+                        if (entry.body.isNotBlank()) {
+                            // 知乎式：截断时「展开 ∨」浮在末行右下角（背景遮罩）；
+                            // 展开后正文完整显示，「收起 ∧」另起一行右对齐，不遮盖末行文字。
+                            var expanded by rememberSaveable(entry.id) { mutableStateOf(false) }
+                            var clamped by rememberSaveable(entry.id) { mutableStateOf(false) }
+                            if (expanded) {
+                                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+                                    Text(
+                                        entry.body,
+                                        Modifier.fillMaxWidth(),
+                                        color = Ink, fontSize = 17.sp, lineHeight = 27.sp,
+                                    )
+                                    Row(
+                                        Modifier
+                                            .clickable { expanded = false }
+                                            .padding(top = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            stringResource(R.string.action_collapse),
+                                            color = Green,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Medium,
+                                        )
+                                        Icon(
+                                            Icons.Default.KeyboardArrowUp,
+                                            contentDescription = stringResource(R.string.a11y_collapse_body),
+                                            tint = Green,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                }
+                            } else {
+                                Box(Modifier.fillMaxWidth()) {
+                                    Text(
+                                        entry.body,
+                                        Modifier.fillMaxWidth(),
+                                        onTextLayout = { result ->
+                                            if (result.lineCount > 0) {
+                                                clamped = result.isLineEllipsized(result.lineCount - 1)
+                                            }
+                                        },
+                                        color = Ink, fontSize = 17.sp, lineHeight = 27.sp,
+                                        maxLines = 5,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    if (clamped) {
+                                        Row(
+                                            Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .background(MaterialTheme.colorScheme.background)
+                                                .clickable { expanded = true }
+                                                .padding(start = 24.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Text(
+                                                stringResource(R.string.action_expand),
+                                                color = Green,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.Medium,
+                                            )
+                                            Icon(
+                                                Icons.Default.KeyboardArrowDown,
+                                                contentDescription = stringResource(R.string.a11y_expand_body),
+                                                tint = Green,
+                                                modifier = Modifier.size(16.dp),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        detail?.let { detail ->
+                            if (detail.visuals.isNotEmpty()) MomentsMediaGrid(
+                                detail.visuals.map { v ->
+                                    MediaCell(
+                                        file = repository.files.resolve(v.relativePath),
+                                        kind = v.kind,
+                                        motionVideo = v.motionVideoPath?.let { repository.files.resolve(it) },
+                                    )
+                                },
+                                Modifier.fillMaxWidth().heightIn(max = 420.dp),
+                            )
+                            detail.audio?.let { InlineAudio(repository.files.resolve(it.relativePath)) }
+                            if (showFeeling && detail.feeling != null) FeelingCard(detail.feeling, repository, epoch, onUnlock, onBiometric)
+                        }
+                    if (showDivider) FineDivider()
+                }
+}
+
