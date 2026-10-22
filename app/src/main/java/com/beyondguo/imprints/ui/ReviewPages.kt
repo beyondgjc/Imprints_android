@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -50,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.beyondguo.imprints.R
@@ -972,4 +974,202 @@ private fun ReviewDatePickerDialog(
     ) {
         DatePicker(state = state, showModeToggle = false)
     }
+}
+
+// ---------- 单页回顾编辑器（V0.2 · RV-03 §3.1「一个编辑页完成创建」） ----------
+
+/**
+ * 单页写回顾。
+ *
+ * V0.2 把原来的「范围 → 选印迹 → 写」三步向导压成一页：进来直接写，关联是可选的追加动作，
+ * 不需要先选标签或印迹才能开始。切换底部「回顾」标签只浏览一级页，不会自动建草稿。
+ */
+@Composable
+fun ReviewEditorPage(
+    reviewRepository: ReviewRepository,
+    initialDraft: ReviewDraft?,
+    draftId: String,
+    onSaved: (String) -> Unit,
+    onCancel: () -> Unit,
+    report: (Throwable) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val today = remember { LocalDate.now() }
+    var startText by remember { mutableStateOf(initialDraft?.startLocalDate ?: today.minusWeeks(1).toString()) }
+    var endText by remember { mutableStateOf(initialDraft?.endLocalDateInclusive ?: today.toString()) }
+    var title by remember { mutableStateOf(initialDraft?.title ?: "") }
+    var body by remember { mutableStateOf(initialDraft?.userBody ?: "") }
+    var selectedKeys by remember { mutableStateOf(initialDraft?.includedKeys ?: emptyList()) }
+    var candidates by remember { mutableStateOf(emptyList<ReviewCandidate>()) }
+    var editingRange by remember { mutableStateOf(0) }   // 0 无 / 1 起 / 2 止
+    var showPicker by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
+
+    val range = remember(startText, endText) {
+        runCatching { DateRange(LocalDate.parse(startText), LocalDate.parse(endText)) }.getOrNull()
+    }
+
+    LaunchedEffect(range) {
+        val r = range ?: return@LaunchedEffect
+        // 标签筛选默认全部（空集合 = 当前时间段全部候选）；V0.2 不再把标签当创建前置步骤
+        runCatching { reviewRepository.candidates(r, emptySet()) }
+            .onSuccess { candidates = it }
+            .onFailure(report)
+    }
+
+    fun buildDraft(): ReviewDraft? {
+        val r = range ?: return null
+        return ReviewDraft(
+            draftId = draftId,
+            reviewId = initialDraft?.reviewId,
+            periodKind = PeriodKind.CUSTOM.name,
+            startLocalDate = r.start.toString(),
+            endLocalDateInclusive = r.endInclusive.toString(),
+            selectedTagIds = emptyList(),
+            title = title,
+            userBody = body,
+            includedKeys = selectedKeys,
+        )
+    }
+
+    fun saveDraftQuietly() {
+        val draft = buildDraft() ?: return
+        scope.launch { runCatching { reviewRepository.saveDraft(draftId, draft) } }
+    }
+
+    val needContent = stringResource(R.string.review_need_content)
+    fun commit() {
+        val draft = buildDraft() ?: return
+        // 新建至少要「非空正文」或「一条关联」；只关联了失效来源时按正文判断
+        if (draft.userBody.isBlank() && draft.includedKeys.isEmpty()) {
+            report(IllegalStateException(needContent))
+            return
+        }
+        saving = true
+        scope.launch {
+            runCatching { reviewRepository.save(draft) }
+                .onSuccess { onSaved(it) }
+                .onFailure(report)
+            saving = false
+        }
+    }
+
+    BackHandler { saveDraftQuietly(); onCancel() }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = { saveDraftQuietly(); onCancel() }) {
+                Text(stringResource(R.string.action_cancel), color = Ink, fontSize = 16.sp)
+            }
+            Text(
+                stringResource(R.string.review_editor_title),
+                Modifier.weight(1f), color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
+            Button(onClick = ::commit, enabled = !saving, shape = RoundedCornerShape(12.dp)) {
+                Text(stringResource(R.string.action_save))
+            }
+        }
+
+        Column(
+            Modifier.fillMaxSize().imePadding().padding(horizontal = 22.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ReviewDateField(stringResource(R.string.review_step_range), startText, { editingRange = 1 }, Modifier.weight(1f))
+                ReviewDateField(stringResource(R.string.review_as_of_today), endText, { editingRange = 2 }, Modifier.weight(1f))
+            }
+
+            OutlinedTextField(
+                title, { title = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text(stringResource(R.string.review_title_optional), color = Quiet) },
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green),
+            )
+
+            OutlinedTextField(
+                body, { body = it }, modifier = Modifier.fillMaxWidth().weight(1f),
+                placeholder = { Text(stringResource(R.string.review_write_hint), color = Quiet) },
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green),
+            )
+
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (selectedKeys.isEmpty()) stringResource(R.string.review_linked_none)
+                    else stringResource(R.string.review_linked_count, selectedKeys.size),
+                    Modifier.weight(1f), color = Quiet, fontSize = 13.sp,
+                )
+                TextButton(onClick = { showPicker = true }) {
+                    Text(stringResource(R.string.review_add_linked), color = Green)
+                }
+            }
+        }
+    }
+
+    if (editingRange != 0) ReviewDatePickerDialog(
+        initial = runCatching {
+            LocalDate.parse(if (editingRange == 1) startText else endText)
+        }.getOrDefault(today),
+        onDismiss = { editingRange = 0 },
+        onPick = { picked ->
+            if (editingRange == 1) startText = picked.toString() else endText = picked.toString()
+            editingRange = 0
+        },
+    )
+
+    if (showPicker) ReviewPickDialog(
+        candidates = candidates,
+        selected = selectedKeys,
+        onToggle = { key ->
+            selectedKeys = if (key in selectedKeys) selectedKeys - key else selectedKeys + key
+        },
+        onDismiss = { showPicker = false },
+    )
+}
+
+/** 关联选择面板：一套勾选（V0.2 废止了「纳入统计 / 精选片段」双选）。 */
+@Composable
+private fun ReviewPickDialog(
+    candidates: List<ReviewCandidate>,
+    selected: List<String>,
+    onToggle: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.review_pick_title)) },
+        text = {
+            if (candidates.isEmpty()) {
+                Text(stringResource(R.string.review_empty_sub), color = Quiet, fontSize = 13.sp)
+            } else {
+                LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                    items(candidates, key = { it.key.toString() }) { candidate ->
+                        val key = candidate.key.toString()
+                        Row(
+                            Modifier.fillMaxWidth().clickable { onToggle(key) }.padding(vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Text(if (key in selected) "✓" else "", color = Green, fontSize = 16.sp)
+                            Column(Modifier.weight(1f)) {
+                                Text(candidate.entry.eventLocalMinute.replace('T', ' '), color = Quiet, fontSize = 12.sp)
+                                Text(
+                                    candidate.entry.body.ifBlank { stringResource(R.string.entry_media_only) },
+                                    color = Ink, fontSize = 14.sp, maxLines = 2,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.review_pick_done)) } },
+    )
 }

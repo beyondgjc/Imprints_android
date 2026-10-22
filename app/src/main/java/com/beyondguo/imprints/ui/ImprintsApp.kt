@@ -817,7 +817,10 @@ fun ImprintsApp(
                     nowMs = nowMs,
                     // V0.2：拆开后的返回栈不保留可回退的信封页，返回直接回邮箱
                     onBack = { page = Page.Mail },
-                    onAddToReview = { addLetterToReviewFor = current.id },
+                    // 邮件只提供日期入口：预填「发出日 ~ 实际接收日」，不读正文、不建立关联
+                    onReviewThisTime = { start, end ->
+                        startWizard("CUSTOM", start, end, emptyList())
+                    },
                     report = ::report,
                 )
                 is Page.LetterEditor -> LetterEditorPage(
@@ -831,10 +834,8 @@ fun ImprintsApp(
                     onCancel = { page = Page.Mail },
                     report = ::report,
                 )
-                is Page.ReviewWizard -> ReviewWizardPage(
+                is Page.ReviewWizard -> ReviewEditorPage(
                     reviewRepository = reviewRepository,
-                    letterRepository = letterRepository,
-                    coreRepository = repository,
                     initialDraft = wizardDraft,
                     draftId = current.draftId,
                     onSaved = { id ->
@@ -1015,38 +1016,6 @@ fun ImprintsApp(
                 sameScopeExistingId = null
                 wizardDraft?.draftId?.let { page = Page.ReviewWizard(it) }
             }) { Text(stringResource(R.string.review_create_new)) } },
-        )
-    }
-    // 已读信主动加入指定总结（逐条、显式来源标识，ML-05 / RV-05）
-    if (!locked) addLetterToReviewFor?.let { letterId ->
-        val reviews by reviewRepository.activeReviews.collectAsState(initial = emptyList())
-        AlertDialog(
-            onDismissRequest = { addLetterToReviewFor = null },
-            title = { Text(stringResource(R.string.letter_add_to_review)) },
-            text = {
-                Column {
-                    if (reviews.isEmpty()) {
-                        // 不能复用回顾列表页的空态文案（「换个时间范围，或直接写总结」）：
-                        // 那会承诺一个这里根本没有的入口，是个死胡同。这里必须给出出路。
-                        Text(stringResource(R.string.mail_add_review_empty), color = Quiet, fontSize = 13.sp)
-                        TextButton(onClick = {
-                            addLetterToReviewFor = null
-                            page = Page.Review
-                        }) { Text(stringResource(R.string.review_go_create)) }
-                    }
-                    reviews.forEach { review ->
-                        TextButton(onClick = {
-                            addLetterToReviewFor = null
-                            scope.launch {
-                                runCatching { reviewRepository.addLetterSource(review.id, letterId) }
-                                    .onSuccess { snackbar.showSnackbar(reviewSaved) }
-                                    .onFailure(::report)
-                            }
-                        }) { Text(review.title.ifBlank { review.startLocalDate }) }
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { addLetterToReviewFor = null }) { Text(stringResource(R.string.action_cancel)) } },
         )
     }
     // FAB「＋」：记录印迹 / 给未来写信（ML-01 入口）

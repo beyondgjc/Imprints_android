@@ -451,6 +451,17 @@
     <string name="review_step_range">范围与标签</string>
     <string name="review_step_pick">挑选片段</string>
     <string name="review_step_write">整理总结</string>
+    <string name="review_editor_title">写回顾</string>
+    <string name="review_write_hint">这一段时间，你想留下什么？</string>
+    <string name="review_linked_count">已关联 %1$d 条</string>
+    <string name="review_linked_none">还没有关联记录，可以直接写，也可以添加</string>
+    <string name="review_add_linked">＋ 添加</string>
+    <string name="review_pick_title">选择关联的印迹</string>
+    <string name="review_pick_done">完成</string>
+    <string name="review_need_content">写点什么，或至少关联一条记录</string>
+    <string name="review_title_optional">标题（可不填）</string>
+    <string name="review_this_time">回顾这段时光</string>
+    <string name="review_source_gone">原印迹已删除或不可用</string>
     <string name="review_as_of_today">截至今天</string>
     <string name="review_included_count">已纳入 %1$d 条</string>
     <string name="review_featured_count">精选 %1$d 条</string>

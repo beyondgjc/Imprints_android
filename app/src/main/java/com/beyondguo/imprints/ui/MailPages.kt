@@ -445,7 +445,7 @@ fun LetterBodyPage(
     letterId: String,
     nowMs: Long,
     onBack: () -> Unit,
-    onAddToReview: () -> Unit,
+    onReviewThisTime: (startDate: String, endDate: String) -> Unit,
     report: (Throwable) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -520,11 +520,17 @@ fun LetterBodyPage(
             item { InlineAudio(repository.files.resolve(audio.relativePath)) }
         }
         if (current.letter.deliveryReadAtMs != null) item {
+            // V0.2：邮件不再作为回顾素材，只提供「按这段时间去写回顾」的快捷入口，
+            // 预填「封存发出日 ~ 首次实际接收日」，不读取正文、也不建立与邮件的关联。
             Button(
-                onClick = onAddToReview,
+                onClick = {
+                    val start = isoDateOfEntry(current.entry.createdAtMs)
+                    val end = current.letter.deliveredAtMs?.let { isoDateOfEntry(it) } ?: start
+                    onReviewThisTime(start, end)
+                },
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text(stringResource(R.string.letter_add_to_review)) }
+            ) { Text(stringResource(R.string.review_this_time)) }
         }
         // 已读信从邮箱直达正文、不再经过信封页，删除入口必须留在这里
         item {
@@ -556,6 +562,10 @@ fun LetterBodyPage(
 @Composable
 private fun isoMinuteOfEntry(createdAtMs: Long): String =
     LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(createdAtMs), ZoneId.systemDefault()).format(MINUTE_FORMAT)
+
+/** 毫秒 → 本地日期（yyyy-MM-dd），用于「回顾这段时光」预填范围。 */
+private fun isoDateOfEntry(ms: Long): String =
+    java.time.Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate().toString()
 
 // ---------- 写信编辑器 ----------
 
