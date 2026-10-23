@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -984,13 +985,37 @@ fun ReviewEditorPage(
             }
         }
     }
-    val audioPicker = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
-    ) { uri ->
-        if (uri != null) scope.launch {
+    fun takeAudioUri(uri: android.net.Uri?) {
+        if (uri == null) return
+        scope.launch {
             runCatching { repository.files.prepare(uri, audio = true) }
                 .onSuccess { audio = attach(it) }
                 .onFailure(report)
+        }
+    }
+    val audioPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { takeAudioUri(it) }
+    // 系统录音机：与「新增印迹」同一套实现（录音机多不回传 URI，返回后退回文件选择器）
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val systemRecorderLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val uri = result.data?.data
+        if (uri != null) {
+            takeAudioUri(uri)
+        } else {
+            android.widget.Toast.makeText(context, "请选择刚录好的那段音频", android.widget.Toast.LENGTH_SHORT).show()
+            audioPicker.launch(arrayOf("audio/*"))
+        }
+    }
+    fun launchSystemRecorder() {
+        val recordIntent = android.content.Intent("android.provider.MediaStore.RECORD_SOUND")
+        if (recordIntent.resolveActivity(context.packageManager) != null) {
+            systemRecorderLauncher.launch(recordIntent)
+        } else {
+            android.widget.Toast.makeText(context, "没有可用的录音机", android.widget.Toast.LENGTH_SHORT).show()
+            audioPicker.launch(arrayOf("audio/*"))
         }
     }
 
@@ -1119,24 +1144,32 @@ fun ReviewEditorPage(
                         }
                     }
                     if (visuals.isNotEmpty()) {
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(visuals, key = { it.path }) { item ->
-                                Box {
-                                    MediaThumbnail(
-                                        repository.files.resolve(item.path),
-                                        item.kind,
-                                        Modifier.size(78.dp).clip(RoundedCornerShape(8.dp)),
-                                    )
-                                    // 右上角移除
-                                    Text(
-                                        "×",
-                                        Modifier
-                                            .align(Alignment.TopEnd)
-                                            .background(Color.Black.copy(alpha = 0.45f), androidx.compose.foundation.shape.CircleShape)
-                                            .clickable { visuals = visuals - item }
-                                            .padding(horizontal = 6.dp, vertical = 1.dp),
-                                        color = Color.White, fontSize = 12.sp,
-                                    )
+                        // 与编辑印迹一致的九宫格：3 列自动换行，9 张一屏看全（横滑只看得到 4 张）
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            repeat((visuals.size + 2) / 3) { row ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    repeat(3) { col ->
+                                        val index = row * 3 + col
+                                        Box(Modifier.weight(1f).aspectRatio(1f)) {
+                                            if (index < visuals.size) {
+                                                val item = visuals[index]
+                                                MediaThumbnail(
+                                                    repository.files.resolve(item.path), item.kind,
+                                                    Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)),
+                                                )
+                                                Text(
+                                                    "×",
+                                                    Modifier
+                                                        .align(Alignment.TopEnd)
+                                                        .padding(4.dp)
+                                                        .background(Color(0x66000000), RoundedCornerShape(50))
+                                                        .clickable { visuals = visuals - item }
+                                                        .padding(horizontal = 7.dp, vertical = 2.dp),
+                                                    color = Color.White, fontSize = 14.sp,
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1151,7 +1184,7 @@ fun ReviewEditorPage(
                                 Text(stringResource(R.string.review_media_remove), color = Quiet, fontSize = 13.sp)
                             }
                         }
-                        TextButton(onClick = { audioPicker.launch(arrayOf("audio/*")) }) {
+                        TextButton(onClick = { showAudioSheet = true }) {
                             Text(stringResource(R.string.review_media_add_audio), color = Green, fontSize = 13.sp)
                         }
                     }
@@ -1191,6 +1224,13 @@ fun ReviewEditorPage(
             if (editingRange == 1) startText = picked.toString() else endText = picked.toString()
             editingRange = 0
         },
+    )
+
+    if (showAudioSheet) AudioSourceSheet(
+        onPickFile = { showAudioSheet = false; audioPicker.launch(arrayOf("audio/*")) },
+        onRecord = { showAudioSheet = false; launchSystemRecorder() },
+        onRemove = audio?.let { { showAudioSheet = false; audio = null } },
+        onDismiss = { showAudioSheet = false },
     )
 
     if (showEntries) ReviewEntriesSheet(candidates, repository) { showEntries = false }
