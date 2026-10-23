@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -71,6 +72,7 @@ import com.beyondguo.imprints.data.ReviewDetail
 import com.beyondguo.imprints.data.ReviewDraft
 import com.beyondguo.imprints.data.ReviewEntity
 import com.beyondguo.imprints.data.MediaFiles
+import com.beyondguo.imprints.data.ReviewAttachment
 import com.beyondguo.imprints.data.ReviewRepository
 import com.beyondguo.imprints.data.SourceKey
 import com.beyondguo.imprints.data.SourceKind
@@ -779,6 +781,22 @@ fun ReviewDetailPage(
                 )
             }
         }
+        // 回顾自有素材：先手写总结与补充素材，最后才是动态范围内的印迹（RV-03 §3.1）
+        run {
+            val ownVisuals = current.ownPaths.filter { ReviewAttachment.of(it).kind != "AUDIO" }
+            val ownAudio = current.ownPaths.firstOrNull { ReviewAttachment.of(it).kind == "AUDIO" }
+            if (ownVisuals.isNotEmpty()) item {
+                MomentsMediaGrid(
+                    ownVisuals.map { path ->
+                        MediaCell(file = coreRepository.files.resolve(path), kind = ReviewAttachment.of(path).kind)
+                    },
+                    Modifier.fillMaxWidth(),
+                )
+            }
+            ownAudio?.let { path ->
+                item { InlineAudio(coreRepository.files.resolve(path)) }
+            }
+        }
         // 动态范围：不再有「来源记录有变化 / 更新回顾」（内容本来就是现读的），
         // 也没有「精选片段」—— 成员就是这段时间命中的全部印迹，给一个入口看即可。
         item {
@@ -944,6 +962,37 @@ fun ReviewEditorPage(
     var editingRange by remember { mutableStateOf(0) }   // 0 无 / 1 起 / 2 止
     var saving by remember { mutableStateOf(false) }
     var showEntries by remember { mutableStateOf(false) }
+    // 回顾自有附件：图片（≤9）与声音（≤1）。选中即落盘，避免 pending 生命周期管理
+    var visuals by remember { mutableStateOf(initialDraft?.visuals ?: emptyList()) }
+    var audio by remember { mutableStateOf(initialDraft?.audio) }
+    var showAudioSheet by remember { mutableStateOf(false) }
+
+    fun attach(prepared: com.beyondguo.imprints.data.PreparedMedia) = ReviewAttachment(
+        path = repository.files.commit(prepared),
+        kind = prepared.kind, mime = prepared.mime,
+        byteLength = prepared.byteLength, sha256 = prepared.sha256,
+    )
+
+    val imagePicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(9),
+    ) { uris ->
+        scope.launch {
+            uris.take(9 - visuals.size).forEach { uri ->
+                runCatching { repository.files.prepare(uri) }
+                    .onSuccess { visuals = visuals + attach(it) }
+                    .onFailure(report)
+            }
+        }
+    }
+    val audioPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) scope.launch {
+            runCatching { repository.files.prepare(uri, audio = true) }
+                .onSuccess { audio = attach(it) }
+                .onFailure(report)
+        }
+    }
 
     val range = remember(startText, endText) {
         runCatching { DateRange(LocalDate.parse(startText), LocalDate.parse(endText)) }.getOrNull()
@@ -968,6 +1017,8 @@ fun ReviewEditorPage(
             selectedTagIds = emptyList(),
             title = title,
             userBody = body,
+            visuals = visuals,
+            audio = audio,
         )
     }
 
@@ -983,7 +1034,8 @@ fun ReviewEditorPage(
     fun commit() {
         val draft = buildDraft() ?: return
         // 新建至少要「非空正文」或「一条关联」；只关联了失效来源时按正文判断
-        if (draft.userBody.isBlank() && candidates.isEmpty()) {
+        // RV-03 §3.3：正文、范围内有效印迹、已导入的回顾自有素材，三者有其一即可保存
+        if (draft.userBody.isBlank() && candidates.isEmpty() && draft.visuals.isEmpty() && draft.audio == null) {
             report(IllegalStateException(needContent))
             return
         }
@@ -1044,6 +1096,66 @@ fun ReviewEditorPage(
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green),
                 )
+            }
+            // 回顾补充素材（RV-01）：图片 ≤9、声音 ≤1，位于正文下方，不展开成完整表单。
+            // 这些是总结自己的附件，不属于任何原印迹，也不计入「视觉媒体」统计。
+            item {
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            stringResource(R.string.review_media_images, visuals.size),
+                            Modifier.weight(1f), color = Quiet, fontSize = 13.sp,
+                        )
+                        TextButton(onClick = {
+                            if (visuals.size < 9) {
+                                imagePicker.launch(
+                                    androidx.activity.result.PickVisualMediaRequest(
+                                        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
+                                    ),
+                                )
+                            }
+                        }) {
+                            Text(stringResource(R.string.review_media_add_image), color = Green, fontSize = 13.sp)
+                        }
+                    }
+                    if (visuals.isNotEmpty()) {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(visuals, key = { it.path }) { item ->
+                                Box {
+                                    MediaThumbnail(
+                                        repository.files.resolve(item.path),
+                                        item.kind,
+                                        Modifier.size(78.dp).clip(RoundedCornerShape(8.dp)),
+                                    )
+                                    // 右上角移除
+                                    Text(
+                                        "×",
+                                        Modifier
+                                            .align(Alignment.TopEnd)
+                                            .background(Color.Black.copy(alpha = 0.45f), androidx.compose.foundation.shape.CircleShape)
+                                            .clickable { visuals = visuals - item }
+                                            .padding(horizontal = 6.dp, vertical = 1.dp),
+                                        color = Color.White, fontSize = 12.sp,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            audio?.let { stringResource(R.string.review_media_audio_on) } ?: stringResource(R.string.review_media_audio_off),
+                            Modifier.weight(1f), color = Quiet, fontSize = 13.sp,
+                        )
+                        if (audio != null) {
+                            TextButton(onClick = { audio = null }) {
+                                Text(stringResource(R.string.review_media_remove), color = Quiet, fontSize = 13.sp)
+                            }
+                        }
+                        TextButton(onClick = { audioPicker.launch(arrayOf("audio/*")) }) {
+                            Text(stringResource(R.string.review_media_add_audio), color = Green, fontSize = 13.sp)
+                        }
+                    }
+                }
             }
             // V0.2 动态范围：不再勾选成员，这里只显示命中条数，点开半屏面板浏览全部记录。
             // 直接平铺会把编辑页撑得很长，写正文时要一直往下滚。

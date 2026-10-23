@@ -89,6 +89,7 @@ import com.beyondguo.imprints.data.ImprintDatabase
 import com.beyondguo.imprints.data.EntryEntity
 import com.beyondguo.imprints.data.ImprintRepository
 import com.beyondguo.imprints.data.PeriodKind
+import com.beyondguo.imprints.data.ReviewAttachment
 import com.beyondguo.imprints.data.ReviewDraft
 import com.beyondguo.imprints.review.ReviewPeriods
 import kotlinx.coroutines.delay
@@ -255,6 +256,9 @@ fun ImprintsApp(
                 userBody = detail.review.userBody,
                 closingText = detail.review.closingText,
                 coverSourceKey = detail.review.coverSourceKey,
+                // 回顾自有附件：路径还原成附件对象
+                visuals = detail.ownPaths.map { ReviewAttachment.of(it) }.filter { it.kind != "AUDIO" },
+                audio = detail.ownPaths.firstOrNull { ReviewAttachment.of(it).kind == "AUDIO" }?.let { ReviewAttachment.of(it) },
             )
             page = Page.ReviewWizard(draftId)
         }

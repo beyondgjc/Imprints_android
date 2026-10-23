@@ -52,6 +52,8 @@ data class ReviewDetail(
     val stats: ReviewStats,
     /** 当前条件命中的候选（含完整详情），详情页的「这段时间的印迹」面板直接用 */
     val candidates: List<ReviewCandidate> = emptyList(),
+    /** 回顾自有附件的相对路径（图片 + 声音），按存储顺序 */
+    val ownPaths: List<String> = emptyList(),
 )
 
 /** 更新预览（RV-06）：标出新增、移除、变化项，由用户选择后再保存。 */
@@ -77,7 +79,55 @@ data class ReviewDraft(
     val includedKeys: List<String> = emptyList(),
     /** 精选片段的来源键（有序，保存用户调整后的顺序） */
     val featuredKeys: List<String> = emptyList(),
+    /** 回顾自有的图片（最多 9 张，按展示顺序），不属于任何原印迹 */
+    val visuals: List<ReviewAttachment> = emptyList(),
+    /** 回顾自有的声音（最多 1 段） */
+    val audio: ReviewAttachment? = null,
 )
+
+/**
+ * 回顾自己拥有的附件（图片 / 声音）。
+ *
+ * 与关联印迹的媒体严格区分：这些文件的所有权记在 `REVIEW`（或草稿期的 `DRAFT`）名下，
+ * 删总结才清理；原印迹的媒体始终只有一份、总结只存指针。RV-01「回顾补充素材」。
+ */
+data class ReviewAttachment(
+    val path: String,
+    val kind: String,
+    val mime: String,
+    val byteLength: Long,
+    val sha256: String,
+) {
+    fun toJson(): JSONObject = JSONObject()
+        .put("path", path).put("kind", kind).put("mime", mime)
+        .put("byteLength", byteLength).put("sha256", sha256)
+
+    companion object {
+        fun fromJson(j: JSONObject) = ReviewAttachment(
+            j.getString("path"), j.getString("kind"), j.getString("mime"),
+            j.getLong("byteLength"), j.getString("sha256"),
+        )
+
+        /**
+         * 从已存的相对路径还原（`media_references` 只记路径，不存 kind/mime）。
+         * 后缀推断足够 UI 渲染与播放；byteLength/sha256 在展示场景用不到，留空。
+         */
+        fun of(path: String): ReviewAttachment {
+            val ext = path.substringAfterLast('.', "").lowercase()
+            val (kind, mime) = when (ext) {
+                "m4a", "aac" -> "AUDIO" to "audio/mp4"
+                "mp3" -> "AUDIO" to "audio/mpeg"
+                "wav" -> "AUDIO" to "audio/wav"
+                "ogg" -> "AUDIO" to "audio/ogg"
+                "gif" -> "GIF" to "image/gif"
+                "png" -> "IMAGE" to "image/png"
+                "webp" -> "IMAGE" to "image/webp"
+                else -> "IMAGE" to "image/jpeg"
+            }
+            return ReviewAttachment(path, kind, mime, 0L, "")
+        }
+    }
+}
 
 /** 草稿 payload 的结构化序列化（JSON，随备份导出）。 */
 fun ReviewDraft.toJson(): JSONObject = JSONObject()
@@ -90,6 +140,8 @@ fun ReviewDraft.toJson(): JSONObject = JSONObject()
     .put("coverSourceKey", coverSourceKey ?: "")
     .put("includedKeys", JSONArray().apply { includedKeys.forEach { put(it) } })
     .put("featuredKeys", JSONArray().apply { featuredKeys.forEach { put(it) } })
+    .put("visuals", JSONArray().apply { visuals.forEach { put(it.toJson()) } })
+    .put("audio", audio?.toJson() ?: "")
 
 fun reviewDraftFromJson(id: String, payload: String): ReviewDraft {
     val j = JSONObject(payload)
@@ -108,6 +160,10 @@ fun reviewDraftFromJson(id: String, payload: String): ReviewDraft {
         coverSourceKey = j.optString("coverSourceKey").takeIf { it.isNotBlank() },
         includedKeys = list("includedKeys"),
         featuredKeys = list("featuredKeys"),
+        visuals = j.optJSONArray("visuals")?.let { arr ->
+            (0 until arr.length()).map { ReviewAttachment.fromJson(arr.getJSONObject(it)) }
+        }.orEmpty(),
+        audio = (j.opt("audio") as? JSONObject)?.let { ReviewAttachment.fromJson(it) },
     )
 }
 
@@ -143,6 +199,8 @@ class ReviewRepository(
                 updatedAtMs = System.currentTimeMillis(),
             ),
         )
+        // 附件所有权跟着草稿走：DRAFT 名下，未保存为正式总结前不归总结所有
+        core.registerMediaOwner(OWNER_DRAFT, draftId, draft.visuals.map { it.path } + draft.audio?.path.orEmpty())
     }
 
     suspend fun draft(id: String): ReviewDraft? =
@@ -197,7 +255,9 @@ class ReviewRepository(
         val matched = candidates(range, tagIds)
         val sources = matched.mapIndexed { index, candidate -> rowOf(review, candidate, index) }
         val media = sources.flatMap { mediaOf(it) }
-        return ReviewDetail(review, sources, media, statsOf(sources, media), matched)
+        // 回顾自己的附件：所有权在 REVIEW 名下（RV-01「回顾补充素材」），与关联印迹的媒体两回事
+        val ownPaths = mailDao.mediaRefPathsOwnedBy(OWNER_REVIEW, review.id)
+        return ReviewDetail(review, sources, media, statsOf(sources, media), matched, ownPaths)
     }
 
     /** 把查询结果包装成「来源行」给 UI 用（纯视图对象，不落库）。 */
@@ -340,6 +400,12 @@ class ReviewRepository(
             mailDao.deleteSourceMedia(reviewId)
             // V0.2 动态范围：成员由「起止日期 + 标签条件」现查，不保存来源 ID 清单或顺序，
             // 所以这里不写 review_sources / review_source_media（上面的 delete 只清历史残留）。
+            //
+            // 回顾自有附件：所有权从草稿（DRAFT）转到总结（REVIEW）名下，
+            // 之后删总结才清理这些文件；草稿名下的记录一并清掉。
+            val ownPaths = draft.visuals.map { it.path } + draft.audio?.path.orEmpty()
+            core.registerMediaOwner(OWNER_REVIEW, reviewId, ownPaths)
+            draft.draftId?.let { core.registerMediaOwner(OWNER_DRAFT, it, emptyList()) }
         }
         draft.draftId?.let { mailDao.deleteDraft(it) }
         reviewId
