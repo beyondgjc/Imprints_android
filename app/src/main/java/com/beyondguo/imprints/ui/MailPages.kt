@@ -73,6 +73,7 @@ import com.beyondguo.imprints.data.LetterAttachment
 import com.beyondguo.imprints.data.LetterDraft
 import com.beyondguo.imprints.data.LetterListRow
 import com.beyondguo.imprints.data.LetterRepository
+import com.beyondguo.imprints.data.MediaItem
 import com.beyondguo.imprints.data.MediaChoice
 import com.beyondguo.imprints.data.PreparedMedia
 import com.beyondguo.imprints.data.VisualMediaEntity
@@ -605,18 +606,19 @@ fun LetterEditorPage(
     var pendingSeal by remember { mutableStateOf(false) }
     var notifyPermissionOk by remember { mutableStateOf(true) }
 
+    // 媒体项与业务无关：直接按值构造即可，不必再伪造一个「印迹归属为空」的实体
     fun toChoice(a: LetterAttachment): MediaChoice = MediaChoice.Existing(
-        VisualMediaEntity(
-            id = a.path, entryId = "", kind = a.kind, ordinal = mediaChoices.size, relativePath = a.path,
-            mime = a.mime, byteLength = a.byteLength, sha256 = a.sha256, createdAtMs = 0,
-            motionVideoPath = a.motionPath, motionVideoSha256 = a.motionSha256, motionVideoByteLength = a.motionByteLength,
+        MediaItem(
+            path = a.path, kind = a.kind, mime = a.mime, byteLength = a.byteLength, sha256 = a.sha256,
+            motionVideoPath = a.motionPath, motionVideoSha256 = a.motionSha256,
+            motionVideoByteLength = a.motionByteLength,
         ),
     )
 
     fun attachmentOf(choice: MediaChoice): LetterAttachment = when (choice) {
         is MediaChoice.Existing -> {
             val v = choice.value
-            LetterAttachment(v.relativePath, v.kind, v.mime, v.byteLength, v.sha256, v.motionVideoPath, v.motionVideoSha256, v.motionVideoByteLength)
+            LetterAttachment(v.path, v.kind, v.mime, v.byteLength, v.sha256, v.motionVideoPath, v.motionVideoSha256, v.motionVideoByteLength)
         }
         is MediaChoice.New -> LetterAttachment(
             choice.value.id, choice.value.kind, choice.value.mime, choice.value.byteLength, choice.value.sha256,

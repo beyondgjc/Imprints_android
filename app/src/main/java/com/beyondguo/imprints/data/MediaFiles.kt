@@ -9,6 +9,75 @@ import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.util.UUID
 
+
+/**
+ * 一个媒体项（图片 / 动图 / 视频 / 声音）。
+ *
+ * **刻意不依赖任何业务实体**：媒体不知道自己属于印迹、信件还是回顾 ——
+ * 谁引用它，谁在自己的行里记这个路径。`VisualMediaEntity` / `AudioEntity` 只是"引用方"，
+ * 它们才需要知道 owner 是谁。
+ *
+ * 这样编辑印迹、写信、写回顾可以共用同一个媒体对象与同一套媒体网格。
+ * 动态照片的附属视频是同一个"项"的组成部分，不单独算一个媒体。
+ */
+data class MediaItem(
+    val path: String,
+    val kind: String,
+    val mime: String,
+    val byteLength: Long,
+    val sha256: String,
+    val motionVideoPath: String? = null,
+    val motionVideoSha256: String? = null,
+    val motionVideoByteLength: Long? = null,
+) {
+    fun toJson(): org.json.JSONObject = org.json.JSONObject()
+        .put("path", path).put("kind", kind).put("mime", mime)
+        .put("byteLength", byteLength).put("sha256", sha256)
+        .put("motionVideoPath", motionVideoPath ?: "")
+        .put("motionVideoSha256", motionVideoSha256 ?: "")
+        .put("motionVideoByteLength", motionVideoByteLength ?: 0L)
+
+    companion object {
+        fun fromJson(j: org.json.JSONObject) = MediaItem(
+            path = j.getString("path"),
+            kind = j.getString("kind"),
+            mime = j.getString("mime"),
+            byteLength = j.getLong("byteLength"),
+            sha256 = j.getString("sha256"),
+            motionVideoPath = j.optString("motionVideoPath").takeIf { it.isNotEmpty() },
+            motionVideoSha256 = j.optString("motionVideoSha256").takeIf { it.isNotEmpty() },
+            motionVideoByteLength = j.optLong("motionVideoByteLength").takeIf { it > 0 },
+        )
+
+        /** 从已存路径还原（表里只记路径时用）：按后缀推断类型。 */
+        fun of(path: String): MediaItem {
+            val ext = path.substringAfterLast('.', "").lowercase()
+            val (kind, mime) = when (ext) {
+                "m4a", "aac" -> "AUDIO" to "audio/mp4"
+                "mp3" -> "AUDIO" to "audio/mpeg"
+                "wav" -> "AUDIO" to "audio/wav"
+                "ogg" -> "AUDIO" to "audio/ogg"
+                "gif" -> "GIF" to "image/gif"
+                "png" -> "IMAGE" to "image/png"
+                "webp" -> "IMAGE" to "image/webp"
+                "mp4" -> "VIDEO" to "video/mp4"
+                else -> "IMAGE" to "image/jpeg"
+            }
+            return MediaItem(path, kind, mime, 0L, "")
+        }
+    }
+}
+
+fun VisualMediaEntity.toMediaItem() = MediaItem(
+    path = relativePath, kind = kind, mime = mime, byteLength = byteLength, sha256 = sha256,
+    motionVideoPath = motionVideoPath, motionVideoSha256 = motionVideoSha256,
+    motionVideoByteLength = motionVideoByteLength,
+)
+
+fun AudioEntity.toMediaItem() = MediaItem(
+    path = relativePath, kind = "AUDIO", mime = mime, byteLength = byteLength, sha256 = sha256,
+)
+
 data class PreparedMedia(
     val id: String,
     val pendingFile: File,

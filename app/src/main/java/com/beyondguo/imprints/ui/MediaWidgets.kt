@@ -420,3 +420,71 @@ fun InlineAudio(
         }
     }
 }
+
+/**
+ * 媒体九宫格（3 列）。**编辑印迹、写信、写回顾共用这一套布局**。
+ *
+ * 输入是「已就绪的一格」[MediaCellInput]（文件 + 类型），
+ * 谁用谁把自己那边的选择类型转过来 —— 这样组件本身不需要知道
+ * MediaChoice / MediaItem / VisualMediaEntity 的存在。
+ *
+ * 注：编辑印迹需要的「长按拖拽排序」还没并进来，那个留在 EditorMediaGrid 里；
+ * 本组件覆盖"展示 + 加 + 删"这类通用需求。
+ */
+data class MediaCellInput(val file: java.io.File, val kind: String, val motionVideo: java.io.File? = null)
+
+@Composable
+internal fun MediaGrid(
+    cells: List<MediaCellInput>,
+    canAdd: Boolean,
+    onAdd: () -> Unit,
+    onRemove: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val columns = 3
+    val gap = 8.dp
+    val total = cells.size + if (canAdd) 1 else 0
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap)) {
+        repeat((total + columns - 1) / columns) { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                repeat(columns) { col ->
+                    val index = row * columns + col
+                    Box(Modifier.weight(1f).aspectRatio(1f)) {
+                        when {
+                            index < cells.size -> {
+                                val cell = cells[index]
+                                MediaThumbnail(
+                                    cell.file, cell.kind,
+                                    Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)),
+                                    motionVideo = cell.motionVideo,
+                                )
+                                Text(
+                                    "×",
+                                    Modifier
+                                        .align(Alignment.TopEnd)
+                                        .padding(4.dp)
+                                        .background(Color(0x66000000), RoundedCornerShape(50))
+                                        .clickable { onRemove(index) }
+                                        .padding(horizontal = 7.dp, vertical = 2.dp),
+                                    color = Color.White, fontSize = 14.sp,
+                                )
+                            }
+                            canAdd && index == cells.size -> {
+                                Surface(
+                                    Modifier.fillMaxSize().clickable(onClick = onAdd),
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = Color(0xFFF3F3F3),
+                                    border = BorderStroke(1.dp, Color(0xFFE0E0E0)),
+                                ) {
+                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Text("＋", color = Quiet, fontSize = 24.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

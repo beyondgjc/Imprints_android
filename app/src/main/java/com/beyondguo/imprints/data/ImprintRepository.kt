@@ -10,13 +10,17 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.UUID
 
+/**
+ * 编辑期的媒体选择：已落盘的（编辑已有内容时）或刚选进来还没提交的。
+ * **Existing 持有的是 [MediaItem]**，不是某个实体 —— 媒体项本身与业务无关。
+ */
 sealed interface MediaChoice {
-    data class Existing(val value: VisualMediaEntity) : MediaChoice
+    data class Existing(val value: MediaItem) : MediaChoice
     data class New(val value: PreparedMedia) : MediaChoice
 }
 
 sealed interface AudioChoice {
-    data class Existing(val value: AudioEntity) : AudioChoice
+    data class Existing(val value: MediaItem) : AudioChoice
     data class New(val value: PreparedMedia) : AudioChoice
 }
 
@@ -168,8 +172,10 @@ class ImprintRepository(
             val visuals = draft.visuals.mapIndexed { ordinal, choice ->
                 when (choice) {
                     is MediaChoice.Existing -> {
-                        check(oldVisuals.any { it.id == choice.value.id }) { "媒体引用无效" }
-                        choice.value.copy(ordinal = ordinal)
+                        // MediaItem 不知道自己属于谁，所以用路径在原实体里找回来（顺序/归属以库为准）
+                        val old = oldVisuals.firstOrNull { it.relativePath == choice.value.path }
+                        check(old != null) { "媒体引用无效" }
+                        old.copy(ordinal = ordinal)
                     }
                     is MediaChoice.New -> {
                         check(choice.value.kind in setOf("IMAGE", "GIF", "VIDEO"))
@@ -189,8 +195,8 @@ class ImprintRepository(
             val audio = when (val choice = draft.audio) {
                 null -> null
                 is AudioChoice.Existing -> {
-                    check(oldAudio?.id == choice.value.id) { "音频引用无效" }
-                    choice.value
+                    check(oldAudio?.relativePath == choice.value.path) { "音频引用无效" }
+                    oldAudio
                 }
                 is AudioChoice.New -> {
                     check(choice.value.kind == "AUDIO")

@@ -74,6 +74,7 @@ import com.beyondguo.imprints.data.AudioChoice
 import com.beyondguo.imprints.data.EntryDraft
 import com.beyondguo.imprints.data.EntryRules
 import com.beyondguo.imprints.data.ImprintRepository
+import com.beyondguo.imprints.data.toMediaItem
 import com.beyondguo.imprints.data.MediaChoice
 import com.beyondguo.imprints.data.PlaceEntity
 import com.beyondguo.imprints.data.TagEntity
@@ -140,8 +141,8 @@ fun EditorPage(
     val errNoRecorder = stringResource(R.string.err_no_recorder)
 
     fun snapshot() = EditorSnapshot(body, feeling, eventTime, placeName, selectedPlace,
-        visuals.map { when (it) { is MediaChoice.Existing -> it.value.id; is MediaChoice.New -> it.value.id } },
-        when (val selected = audio) { is AudioChoice.Existing -> selected.value.id; is AudioChoice.New -> selected.value.id; null -> null },
+        visuals.map { when (it) { is MediaChoice.Existing -> it.value.path; is MediaChoice.New -> it.value.id } },
+        when (val selected = audio) { is AudioChoice.Existing -> selected.value.path; is AudioChoice.New -> selected.value.id; null -> null },
         selectedTagIds)
     fun discardPending() {
         visuals.forEach { if (it is MediaChoice.New) repository.files.discard(it.value) }
@@ -168,8 +169,8 @@ fun EditorPage(
                 placeName = detail.place?.name.orEmpty()
                 selectedPlace = detail.place
                 visuals.clear()
-                visuals.addAll(detail.visuals.map(MediaChoice::Existing))
-                audio = detail.audio?.let(AudioChoice::Existing)
+                visuals.addAll(detail.visuals.map { MediaChoice.Existing(it.toMediaItem()) })
+                audio = detail.audio?.let { AudioChoice.Existing(it.toMediaItem()) }
                 // 标签不参与“感受解锁”分支，用 loaded 单独把住，避免锁屏返回后丢选择
                 if (!loaded) selectedTagIds = detail.tagIds.toSet()
             }
@@ -354,7 +355,7 @@ fun EditorPage(
                     trailing = EditorMetaTrailing.Chevron,
                 )
                 is AudioChoice.Existing -> {
-                    val file = repository.files.resolve(selected.value.relativePath)
+                    val file = repository.files.resolve(selected.value.path)
                     EditorAudioSelectedRow(
                         file = file,
                         displayName = friendlyAudioName(file.nameWithoutExtension),
@@ -1120,7 +1121,7 @@ internal fun EditorMediaGrid(
                             index < visuals.size -> {
                                 val choice = visuals[index]
                                 val file = when (choice) {
-                                    is MediaChoice.Existing -> repository.files.resolve(choice.value.relativePath)
+                                    is MediaChoice.Existing -> repository.files.resolve(choice.value.path)
                                     is MediaChoice.New -> choice.value.pendingFile
                                 }
                                 val kind = when (choice) {

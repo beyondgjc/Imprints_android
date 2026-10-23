@@ -73,7 +73,7 @@ import com.beyondguo.imprints.data.ReviewDetail
 import com.beyondguo.imprints.data.ReviewDraft
 import com.beyondguo.imprints.data.ReviewEntity
 import com.beyondguo.imprints.data.MediaFiles
-import com.beyondguo.imprints.data.ReviewAttachment
+import com.beyondguo.imprints.data.MediaItem
 import com.beyondguo.imprints.data.ReviewRepository
 import com.beyondguo.imprints.data.SourceKey
 import com.beyondguo.imprints.data.SourceKind
@@ -784,12 +784,12 @@ fun ReviewDetailPage(
         }
         // 回顾自有素材：先手写总结与补充素材，最后才是动态范围内的印迹（RV-03 §3.1）
         run {
-            val ownVisuals = current.ownPaths.filter { ReviewAttachment.of(it).kind != "AUDIO" }
-            val ownAudio = current.ownPaths.firstOrNull { ReviewAttachment.of(it).kind == "AUDIO" }
+            val ownVisuals = current.ownPaths.filter { MediaItem.of(it).kind != "AUDIO" }
+            val ownAudio = current.ownPaths.firstOrNull { MediaItem.of(it).kind == "AUDIO" }
             if (ownVisuals.isNotEmpty()) item {
                 MomentsMediaGrid(
                     ownVisuals.map { path ->
-                        MediaCell(file = coreRepository.files.resolve(path), kind = ReviewAttachment.of(path).kind)
+                        MediaCell(file = coreRepository.files.resolve(path), kind = MediaItem.of(path).kind)
                     },
                     Modifier.fillMaxWidth(),
                 )
@@ -968,7 +968,7 @@ fun ReviewEditorPage(
     var audio by remember { mutableStateOf(initialDraft?.audio) }
     var showAudioSheet by remember { mutableStateOf(false) }
 
-    fun attach(prepared: com.beyondguo.imprints.data.PreparedMedia) = ReviewAttachment(
+    fun attach(prepared: com.beyondguo.imprints.data.PreparedMedia) = MediaItem(
         path = repository.files.commit(prepared),
         kind = prepared.kind, mime = prepared.mime,
         byteLength = prepared.byteLength, sha256 = prepared.sha256,
@@ -1144,35 +1144,21 @@ fun ReviewEditorPage(
                         }
                     }
                     if (visuals.isNotEmpty()) {
-                        // 与编辑印迹一致的九宫格：3 列自动换行，9 张一屏看全（横滑只看得到 4 张）
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            repeat((visuals.size + 2) / 3) { row ->
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    repeat(3) { col ->
-                                        val index = row * 3 + col
-                                        Box(Modifier.weight(1f).aspectRatio(1f)) {
-                                            if (index < visuals.size) {
-                                                val item = visuals[index]
-                                                MediaThumbnail(
-                                                    repository.files.resolve(item.path), item.kind,
-                                                    Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)),
-                                                )
-                                                Text(
-                                                    "×",
-                                                    Modifier
-                                                        .align(Alignment.TopEnd)
-                                                        .padding(4.dp)
-                                                        .background(Color(0x66000000), RoundedCornerShape(50))
-                                                        .clickable { visuals = visuals - item }
-                                                        .padding(horizontal = 7.dp, vertical = 2.dp),
-                                                    color = Color.White, fontSize = 14.sp,
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        // 复用通用媒体网格：3 列自动换行，9 张一屏看全
+                        MediaGrid(
+                            cells = visuals.map {
+                                MediaCellInput(repository.files.resolve(it.path), it.kind)
+                            },
+                            canAdd = visuals.size < 9,
+                            onAdd = {
+                                imagePicker.launch(
+                                    androidx.activity.result.PickVisualMediaRequest(
+                                        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
+                                    ),
+                                )
+                            },
+                            onRemove = { index -> visuals = visuals.filterIndexed { i2, _ -> i2 != index } },
+                        )
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
