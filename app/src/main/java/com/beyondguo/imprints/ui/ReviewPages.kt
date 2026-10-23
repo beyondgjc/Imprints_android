@@ -719,6 +719,8 @@ private fun CandidateRow(
 
 @Composable
 fun ReviewDetailPage(
+    /** 从回收站进来：只能彻底删除，不给编辑、不给写信（RV-07） */
+    inRecycle: Boolean = false,
     reviewRepository: ReviewRepository,
     coreRepository: ImprintRepository,
     letterRepository: LetterRepository,
@@ -806,25 +808,44 @@ fun ReviewDetailPage(
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton2(stringResource(R.string.review_write_letter)) { onWriteLetter(current.review.closingText) }
-                // 删除 = 移入回收站，7 天内可恢复（RV-07）；不是「彻底删除」
-                OutlinedButton2(stringResource(R.string.action_delete), danger = true) { confirmDelete = true }
+                if (!inRecycle) {
+                    OutlinedButton2(stringResource(R.string.review_write_letter)) { onWriteLetter(current.review.closingText) }
+                }
+                // 正常态：删除 = 移入回收站，7 天内可恢复
+                // 回收站态：已经删过一次了，这里只能是彻底删除（对齐印迹回收站的行为）
+                OutlinedButton2(
+                    stringResource(if (inRecycle) R.string.action_delete_forever else R.string.action_delete),
+                    danger = true,
+                ) { confirmDelete = true }
             }
         }
     }
 
     if (confirmDelete) AlertDialog(
         onDismissRequest = { confirmDelete = false },
-        title = { Text(stringResource(R.string.review_delete_confirm_title)) },
-        text = { Text(stringResource(R.string.review_delete_confirm_body)) },
+        title = {
+            Text(stringResource(if (inRecycle) R.string.review_purge_confirm_title else R.string.review_delete_confirm_title))
+        },
+        text = {
+            Text(stringResource(if (inRecycle) R.string.review_purge_confirm_body else R.string.review_delete_confirm_body))
+        },
         confirmButton = {
             TextButton(onClick = {
                 confirmDelete = false
                 scope.launch {
-                    runCatching { reviewRepository.moveToRecycle(reviewId) }
-                        .onSuccess { onDelete() }.onFailure(report)
+                    val action = if (inRecycle) {
+                        runCatching { reviewRepository.deletePermanently(reviewId) }
+                    } else {
+                        runCatching { reviewRepository.moveToRecycle(reviewId) }
+                    }
+                    action.onSuccess { onDelete() }.onFailure(report)
                 }
-            }) { Text(stringResource(R.string.review_move_to_recycle), color = Danger) }
+            }) {
+                Text(
+                    stringResource(if (inRecycle) R.string.action_delete_forever else R.string.review_move_to_recycle),
+                    color = Danger,
+                )
+            }
         },
         dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.action_cancel)) } },
     )

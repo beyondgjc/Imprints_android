@@ -502,6 +502,8 @@
     <string name="review_delete_confirm_title">将这份总结移入回收站？</string>
     <string name="review_delete_confirm_body">7 天内可以恢复，来源印迹不受影响。</string>
     <string name="review_move_to_recycle">移入回收站</string>
+    <string name="review_purge_confirm_title">彻底删除这份总结？</string>
+    <string name="review_purge_confirm_body">删除后无法恢复，来源印迹不受影响。</string>
     <string name="review_existing_title">该范围已有总结</string>
     <string name="review_existing_message">打开已有总结，或另建一个专题？</string>
     <string name="review_open_existing">打开已有</string>

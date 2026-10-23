@@ -110,7 +110,7 @@ private sealed interface Page {
     data class LetterBody(val id: String) : Page
     data class LetterEditor(val draftId: String?, val letterId: String?, val prefillBody: String = "") : Page
     data class ReviewWizard(val draftId: String) : Page
-    data class ReviewDetail(val id: String) : Page
+    data class ReviewDetail(val id: String, val inRecycle: Boolean = false) : Page
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -446,7 +446,7 @@ fun ImprintsApp(
                         }
                     }
                     // 回顾详情：编辑挪到右上角，用图标（和印迹详情的文字按钮区分开，页面里不再重复放按钮）
-                    if (page is Page.ReviewDetail) {
+                    if (page is Page.ReviewDetail && !(page as Page.ReviewDetail).inRecycle) {
                         IconButton(onClick = { openReviewEditor((page as Page.ReviewDetail).id) }) {
                             Icon(Icons.Default.Edit, stringResource(R.string.action_edit), tint = Ink)
                         }
@@ -717,7 +717,7 @@ fun ImprintsApp(
                             when (item.kind) {
                                 // V0.2：回收站里的信件不提供正文预览，须先恢复再走正常拆信流程
                                 "LETTER" -> scope.launch { snackbar.showSnackbar(recycleLetterHint) }
-                                "REVIEW" -> page = Page.ReviewDetail(item.id)
+                                "REVIEW" -> page = Page.ReviewDetail(item.id, inRecycle = true)
                                 else -> page = Page.RecycleDetail(item.id)
                             }
                         },
@@ -875,6 +875,7 @@ fun ImprintsApp(
                     report = ::report,
                 )
                 is Page.ReviewDetail -> ReviewDetailPage(
+                    inRecycle = current.inRecycle,
                     reviewRepository = reviewRepository,
                     coreRepository = repository,
                     letterRepository = letterRepository,
