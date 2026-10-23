@@ -462,8 +462,8 @@
     <string name="review_title_optional">标题（可不填）</string>
     <string name="review_this_time">回顾这段时光</string>
     <string name="review_media_images">补充图片 %1$d/9</string>
-    <string name="review_media_add_image">＋ 图片</string>
-    <string name="review_media_add_audio">＋ 声音</string>
+    <string name="review_media_add_image">图片</string>
+    <string name="review_media_add_audio">添加声音</string>
     <string name="review_media_audio_on">已添加 1 段声音</string>
     <string name="review_media_audio_off">还没有声音</string>
     <string name="review_media_remove">移除</string>

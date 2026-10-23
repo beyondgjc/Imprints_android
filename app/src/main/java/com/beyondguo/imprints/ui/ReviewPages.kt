@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -1122,58 +1123,50 @@ fun ReviewEditorPage(
                     colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green),
                 )
             }
-            // 回顾补充素材（RV-01）：图片 ≤9、声音 ≤1，位于正文下方，不展开成完整表单。
-            // 这些是总结自己的附件，不属于任何原印迹，也不计入「视觉媒体」统计。
+            // 补充素材（RV-01）：**布局与编辑印迹完全一致** ——
+            // 九宫格的「＋」格负责添加（没有额外的标题行/按钮），声音用同一个 EditorMetaRow。
             item {
-                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            stringResource(R.string.review_media_images, visuals.size),
-                            Modifier.weight(1f), color = Quiet, fontSize = 13.sp,
+                MediaGrid(
+                    cells = visuals.map { MediaCellInput(repository.files.resolve(it.path), it.kind) },
+                    canAdd = visuals.size < 9,
+                    onAdd = {
+                        imagePicker.launch(
+                            androidx.activity.result.PickVisualMediaRequest(
+                                androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
+                            ),
                         )
-                        TextButton(onClick = {
-                            if (visuals.size < 9) {
-                                imagePicker.launch(
-                                    androidx.activity.result.PickVisualMediaRequest(
-                                        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
-                                    ),
-                                )
-                            }
-                        }) {
-                            Text(stringResource(R.string.review_media_add_image), color = Green, fontSize = 13.sp)
+                    },
+                    onRemove = { index -> visuals = visuals.filterIndexed { i2, _ -> i2 != index } },
+                    addContent = {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                            Icon(Icons.Default.Add, null, tint = Color(0xFF999999), modifier = Modifier.size(36.dp))
+                            Text(stringResource(R.string.review_media_add_image), color = Color(0xFF999999), fontSize = 12.sp)
+                            Text(
+                                stringResource(R.string.editor_media_counter, visuals.size),
+                                color = Color(0xFFBBBBBB), fontSize = 11.sp,
+                            )
                         }
-                    }
-                    if (visuals.isNotEmpty()) {
-                        // 复用通用媒体网格：3 列自动换行，9 张一屏看全
-                        MediaGrid(
-                            cells = visuals.map {
-                                MediaCellInput(repository.files.resolve(it.path), it.kind)
-                            },
-                            canAdd = visuals.size < 9,
-                            onAdd = {
-                                imagePicker.launch(
-                                    androidx.activity.result.PickVisualMediaRequest(
-                                        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
-                                    ),
-                                )
-                            },
-                            onRemove = { index -> visuals = visuals.filterIndexed { i2, _ -> i2 != index } },
-                        )
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            audio?.let { stringResource(R.string.review_media_audio_on) } ?: stringResource(R.string.review_media_audio_off),
-                            Modifier.weight(1f), color = Quiet, fontSize = 13.sp,
-                        )
-                        if (audio != null) {
-                            TextButton(onClick = { audio = null }) {
-                                Text(stringResource(R.string.review_media_remove), color = Quiet, fontSize = 13.sp)
-                            }
-                        }
-                        TextButton(onClick = { showAudioSheet = true }) {
-                            Text(stringResource(R.string.review_media_add_audio), color = Green, fontSize = 13.sp)
-                        }
-                    }
+                    },
+                )
+            }
+            item {
+                if (audio == null) {
+                    EditorMetaRow(
+                        leadingContent = { Text("♪", color = Quiet, fontSize = 18.sp) },
+                        title = stringResource(R.string.review_media_add_audio),
+                        subtitle = null,
+                        titleColor = Quiet,
+                        onClick = { showAudioSheet = true },
+                        trailing = EditorMetaTrailing.Chevron,
+                    )
+                } else {
+                    val file = repository.files.resolve(audio!!.path)
+                    EditorAudioSelectedRow(
+                        file = file,
+                        displayName = friendlyAudioName(file.nameWithoutExtension),
+                        onRemove = { audio = null },
+                        onReplace = { showAudioSheet = true },
+                    )
                 }
             }
             // V0.2 动态范围：不再勾选成员，这里只显示命中条数，点开半屏面板浏览全部记录。
