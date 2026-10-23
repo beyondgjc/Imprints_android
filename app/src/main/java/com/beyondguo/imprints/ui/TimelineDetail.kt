@@ -212,13 +212,17 @@ fun TimelinePage(
                 }
                 val delta = offset - lastOffset
                 lastOffset = offset
-                // 注意方向：firstVisibleItemScrollOffset 增大 = 内容被手指往上推（在看更新的记录）
-                // → 收起 chrome；减小 = 往回翻 → 立即展开。
+                // 方向：firstVisibleItemScrollOffset 增大 = 内容被手指往上推（看更新的记录）→ 收起；
+                // 减小 = 往回翻 → 展开。
                 //
-                // 但滚到两端后的 overscroll 回弹也会产生反向 delta，若不拦住，
-                // 滑到底部时 chrome 会「自己弹出来」，把最后一条记录重新挤出去。
-                if (delta > 4 && listState.canScrollForward) onChromeChange(false)
-                else if (delta < -4 && listState.canScrollBackward) onChromeChange(true)
+                // 两端都要用 canScrollForward 兜住，不能只兜一边：
+                // 滚到底时 canScrollBackward 依然是 true（内容够长、理论上能往回滚），
+                // 停手瞬间的微小回弹会被当成"往回翻"而展开 chrome；而 header 一展开内容区就变矮，
+                // 列表被挤压再滚一下，又触发一次 —— 这就是"偶现"的来源，抖动会被放大成循环。
+                // 正确判断是「还能不能往下滚」（不在底部才允许展开）+ 更大的死区。
+                val canGoDown = listState.canScrollForward
+                if (delta > 12 && canGoDown) onChromeChange(false)
+                else if (delta < -12 && canGoDown) onChromeChange(true)
             }
     }
 
