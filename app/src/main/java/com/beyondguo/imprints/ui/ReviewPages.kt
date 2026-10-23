@@ -799,7 +799,6 @@ fun ReviewDetailPage(
             }
         }
         if (current.review.userBody.isNotBlank()) {
-            item { Text(stringResource(R.string.review_label_summary), color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold) }
             item { Text(current.review.userBody, color = Ink, fontSize = 16.sp, lineHeight = 26.sp) }
         }
         if (current.review.closingText.isNotBlank()) {
@@ -812,8 +811,23 @@ fun ReviewDetailPage(
                 OutlinedButton2(stringResource(R.string.action_delete), danger = true) { confirmDelete = true }
             }
         }
-        item { Text(stringResource(R.string.review_delete_hint), color = Quiet, fontSize = 12.sp) }
     }
+
+    if (confirmDelete) AlertDialog(
+        onDismissRequest = { confirmDelete = false },
+        title = { Text(stringResource(R.string.review_delete_confirm_title)) },
+        text = { Text(stringResource(R.string.review_delete_confirm_body)) },
+        confirmButton = {
+            TextButton(onClick = {
+                confirmDelete = false
+                scope.launch {
+                    runCatching { reviewRepository.moveToRecycle(reviewId) }
+                        .onSuccess { onDelete() }.onFailure(report)
+                }
+            }) { Text(stringResource(R.string.review_move_to_recycle), color = Danger) }
+        },
+        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.action_cancel)) } },
+    )
 
     if (showEntries) ReviewEntriesSheet(current.candidates, coreRepository) { showEntries = false }
 
