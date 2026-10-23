@@ -3,6 +3,12 @@ package com.beyondguo.imprints.ui
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.background
@@ -398,6 +404,10 @@ fun ImprintsApp(
     val topLevelPage = page == Page.Timeline || page == Page.Review || page == Page.Mail
     val ownHeader = topLevelPage || page is Page.Editor || page is Page.LetterEditor || page is Page.ReviewWizard
     var showFabMenu by remember { mutableStateOf(false) }
+    // 顶部 chrome 与底部 tab 是否显示；由印迹首页的滚动方向驱动（下滑收起、上滑回来）
+    var chromeVisible by remember { mutableStateOf(true) }
+    // 切页时恢复显示，避免从别处回到首页还是隐藏状态
+    LaunchedEffect(page) { chromeVisible = true }
     val unreadLetters = sealedLetters.count {
         it.deliveryReadAtMs == null && com.beyondguo.imprints.mail.LetterRules.isDue(it.toEntity(), nowMs)
     }
@@ -453,8 +463,14 @@ fun ImprintsApp(
             )
         },
         bottomBar = {
-            // 底部顺序固定「印迹 · 回顾 · 时光邮箱」；二级页隐藏底部导航
-            if (topLevelPage && !locked) NavigationBar(containerColor = MaterialTheme.colorScheme.background) {
+            // 底部顺序固定「印迹 · 回顾 · 时光邮箱」；二级页隐藏底部导航。
+            // 印迹首页滚动时与顶部一起收放，把高度让给内容。
+            if (topLevelPage && !locked) AnimatedVisibility(
+                visible = chromeVisible,
+                enter = expandVertically(animationSpec = tween(180)) + fadeIn(animationSpec = tween(180)),
+                exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(animationSpec = tween(120)),
+            ) {
+            NavigationBar(containerColor = MaterialTheme.colorScheme.background) {
                 // 选中态必须显式给色：默认走 Material3 的 onSecondaryContainer（深灰），
                 // 看起来就是「填充变黑」。这里统一用应用内的 Green。
                 val navColors = NavigationBarItemDefaults.colors(
@@ -520,6 +536,7 @@ fun ImprintsApp(
                     label = { Text(stringResource(R.string.nav_mail)) },
                 )
             }
+            }
         },
         snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = { when (page) {
@@ -584,6 +601,8 @@ fun ImprintsApp(
                                 .onFailure(::report)
                         }
                     },
+                    chromeVisible = chromeVisible,
+                    onChromeChange = { chromeVisible = it },
                     onReviewMonth = { month ->
                         val range = com.beyondguo.imprints.review.ReviewPeriods.monthOf(
                             java.time.LocalDate.parse(month + "-01"),

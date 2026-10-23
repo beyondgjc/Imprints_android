@@ -1,6 +1,12 @@
 package com.beyondguo.imprints.ui
 
 import android.app.Dialog
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
@@ -43,11 +49,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -113,6 +121,9 @@ fun TimelinePage(
     onDeleteTag: (String) -> Unit = {},
     /** 月份标题菜单：回顾这个月（带上当前标签筛选） */
     onReviewMonth: (String) -> Unit = {},
+    /** 顶部 chrome（标题 + 标签）与底部 tab 是否显示；由外层持有，两处一起收放 */
+    chromeVisible: Boolean = true,
+    onChromeChange: (Boolean) -> Unit = {},
     onError: (Throwable) -> Unit = {},
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -193,25 +204,51 @@ fun TimelinePage(
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
-    LazyColumn(Modifier.fillMaxSize(), state = listState) {
-        item(key = "header") {
-            Column(Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 28.dp, bottom = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(stringResource(R.string.timeline_title), Modifier.weight(1f), color = Ink, fontSize = 34.sp, fontWeight = FontWeight.Bold)
-                    IconButton(onClick = onSettings) { Icon(Icons.Default.MoreVert, stringResource(R.string.a11y_settings), tint = Quiet) }
+    // 滚动感知：下滑隐藏 chrome（把高度让给内容），上滑立即回来。阈值 4px 用来滤掉抖动。
+    var lastIndex by remember { mutableIntStateOf(-1) }
+    var lastOffset by remember { mutableIntStateOf(0) }
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .collect { (index, offset) ->
+                if (index != lastIndex) {
+                    val goingDown = index > lastIndex
+                    lastIndex = index
+                    lastOffset = offset
+                    if (goingDown && index > 0) onChromeChange(false)
+                    return@collect
                 }
-                // 标签筛选：单行横向滚动，首位「全部」= 未筛选，行内只放内置标签，多选仍为叠加（OR）
-                TagFilterRow(
-                    tags = chipTags,
-                    selectedIds = selectedTagIds,
-                    onToggle = onToggleTag,
-                    onClear = onClearTags,
-                    onMore = { showTagPanel = true },
-                )
+                val delta = offset - lastOffset
+                lastOffset = offset
+                // 注意方向：firstVisibleItemScrollOffset 增大 = 内容被手指往上推（在看更新的记录）
+                // → 收起 chrome；减小 = 往回翻 → 立即展开。
+                if (delta > 4) onChromeChange(false) else if (delta < -4) onChromeChange(true)
             }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize()) {
+    AnimatedVisibility(
+        visible = chromeVisible,
+        enter = expandVertically(animationSpec = tween(180)) + fadeIn(animationSpec = tween(180)),
+        exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(animationSpec = tween(120)),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(start = 22.dp, end = 16.dp, top = 28.dp, bottom = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.timeline_title), Modifier.weight(1f), color = Ink, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+                IconButton(onClick = onSettings) { Icon(Icons.Default.MoreVert, stringResource(R.string.a11y_settings), tint = Quiet) }
+            }
+            // 标签筛选：单行横向滚动，首位「全部」= 未筛选，行内只放内置标签，多选仍为叠加（OR）
+            TagFilterRow(
+                tags = chipTags,
+                selectedIds = selectedTagIds,
+                onToggle = onToggleTag,
+                onClear = onClearTags,
+                onMore = { showTagPanel = true },
+            )
         }
+    }
+    LazyColumn(Modifier.fillMaxSize(), state = listState) {
         if (entries.isEmpty() || visibleEntries.isEmpty()) item {
             Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 56.dp),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -292,6 +329,7 @@ fun TimelinePage(
                 )
             }
         }
+    }
     }
 
     // 回到顶部：叠在 Scaffold FAB（+）上方，下滑一段后出现
