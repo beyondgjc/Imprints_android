@@ -11,6 +11,9 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -425,11 +428,12 @@ fun InlineAudio(
  * 媒体九宫格（3 列）。**编辑印迹、写信、写回顾共用这一套布局**。
  *
  * 输入是「已就绪的一格」[MediaCellInput]（文件 + 类型），
- * 谁用谁把自己那边的选择类型转过来 —— 这样组件本身不需要知道
+ * 谁用谁把自己那边的选择类型转过来 —— 组件本身不需要知道
  * MediaChoice / MediaItem / VisualMediaEntity 的存在。
  *
- * 注：编辑印迹需要的「长按拖拽排序」还没并进来，那个留在 EditorMediaGrid 里；
- * 本组件覆盖"展示 + 加 + 删"这类通用需求。
+ * @param onMove 传入则支持**长按拖拽排序**（拖过半格与目标交换）。
+ *   交换由调用方改自己的列表，组件不持有数据。
+ * @param addContent 「＋」格的内容；编辑印迹放图标 + 文案，回顾只放一个＋号。
  */
 data class MediaCellInput(val file: java.io.File, val kind: String, val motionVideo: java.io.File? = null)
 
@@ -439,11 +443,16 @@ internal fun MediaGrid(
     canAdd: Boolean,
     onAdd: () -> Unit,
     onRemove: (Int) -> Unit,
+    onMove: ((from: Int, to: Int) -> Unit)? = null,
+    addContent: @Composable () -> Unit = { Text("＋", color = Quiet, fontSize = 24.sp) },
     modifier: Modifier = Modifier,
 ) {
     val columns = 3
     val gap = 8.dp
+    var dragIndex by remember(cells.size) { mutableStateOf(-1) }
+    var dragOffset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     val total = cells.size + if (canAdd) 1 else 0
+
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap)) {
         repeat((total + columns - 1) / columns) { row ->
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
@@ -453,21 +462,72 @@ internal fun MediaGrid(
                         when {
                             index < cells.size -> {
                                 val cell = cells[index]
-                                MediaThumbnail(
-                                    cell.file, cell.kind,
-                                    Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)),
-                                    motionVideo = cell.motionVideo,
-                                )
-                                Text(
-                                    "×",
+                                val dragging = dragIndex == index
+                                Box(
                                     Modifier
-                                        .align(Alignment.TopEnd)
-                                        .padding(4.dp)
-                                        .background(Color(0x66000000), RoundedCornerShape(50))
-                                        .clickable { onRemove(index) }
-                                        .padding(horizontal = 7.dp, vertical = 2.dp),
-                                    color = Color.White, fontSize = 14.sp,
-                                )
+                                        .fillMaxSize()
+                                        .graphicsLayer {
+                                            if (dragging) {
+                                                scaleX = 1.05f
+                                                scaleY = 1.05f
+                                                translationX = dragOffset.x
+                                                translationY = dragOffset.y
+                                                shadowElevation = 12f
+                                                alpha = 0.92f
+                                            }
+                                        }
+                                        .then(
+                                            if (onMove == null) Modifier else Modifier.pointerInput(index, cells.size) {
+                                                detectDragGesturesAfterLongPress(
+                                                    onDragStart = {
+                                                        dragIndex = index
+                                                        dragOffset = androidx.compose.ui.geometry.Offset.Zero
+                                                    },
+                                                    onDrag = { change, amount ->
+                                                        change.consume()
+                                                        dragOffset += amount
+                                                        val from = dragIndex
+                                                        if (from in cells.indices) {
+                                                            val cellSize = size.width.toFloat()
+                                                            val c = from % columns
+                                                            val r = from / columns
+                                                            var target = -1
+                                                            when {
+                                                                dragOffset.x > cellSize * 0.5f && c < columns - 1 &&
+                                                                    from + 1 < cells.size -> target = from + 1
+                                                                dragOffset.x < -cellSize * 0.5f && c > 0 -> target = from - 1
+                                                                dragOffset.y > cellSize * 0.5f && indexInRange(from + columns, cells.size) -> target = from + columns
+                                                                dragOffset.y < -cellSize * 0.5f && r > 0 -> target = from - columns
+                                                            }
+                                                            if (target in cells.indices && target != from) {
+                                                                onMove(from, target)
+                                                                dragIndex = target
+                                                                dragOffset = androidx.compose.ui.geometry.Offset.Zero
+                                                            }
+                                                        }
+                                                    },
+                                                    onDragEnd = { dragIndex = -1; dragOffset = androidx.compose.ui.geometry.Offset.Zero },
+                                                    onDragCancel = { dragIndex = -1; dragOffset = androidx.compose.ui.geometry.Offset.Zero },
+                                                )
+                                            },
+                                        ),
+                                ) {
+                                    MediaThumbnail(
+                                        cell.file, cell.kind,
+                                        Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)),
+                                        motionVideo = cell.motionVideo,
+                                    )
+                                    Text(
+                                        "×",
+                                        Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(4.dp)
+                                            .background(Color(0x66000000), RoundedCornerShape(50))
+                                            .clickable { onRemove(index) }
+                                            .padding(horizontal = 7.dp, vertical = 2.dp),
+                                        color = Color.White, fontSize = 14.sp,
+                                    )
+                                }
                             }
                             canAdd && index == cells.size -> {
                                 Surface(
@@ -476,9 +536,7 @@ internal fun MediaGrid(
                                     color = Color(0xFFF3F3F3),
                                     border = BorderStroke(1.dp, Color(0xFFE0E0E0)),
                                 ) {
-                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                        Text("＋", color = Quiet, fontSize = 24.sp)
-                                    }
+                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { addContent() }
                                 }
                             }
                         }
@@ -488,3 +546,5 @@ internal fun MediaGrid(
         }
     }
 }
+
+private fun indexInRange(index: Int, size: Int) = index in 0 until size

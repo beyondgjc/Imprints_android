@@ -1092,8 +1092,8 @@ internal fun EditorAudioSelectedRow(
 }
 
 /**
- * 朋友圈式编辑媒体网格：已选图在前，「+」添加框固定在末尾（满 9 张不显示）；
- * 长按拖动可调整顺序，角标 × 删除。
+ * 编辑印迹的媒体区：**布局与拖拽都在 [MediaGrid] 里**，
+ * 这里只做「MediaChoice → 文件 + 类型」的翻译，和「＋」格的内容。
  */
 @Composable
 internal fun EditorMediaGrid(
@@ -1103,116 +1103,30 @@ internal fun EditorMediaGrid(
     onRemove: (Int) -> Unit,
     report: (Throwable) -> Unit,
 ) {
-    val columns = 3
-    val gap = 8.dp
-    var dragIndex by remember(visuals.size) { mutableStateOf(-1) }
-    var dragOffset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
-    val canAdd = visuals.size < EntryRules.MAX_VISUALS
-    val cells = visuals.size + if (canAdd) 1 else 0
-    val rows = (cells + columns - 1) / columns
-
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap)) {
-        repeat(rows) { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                repeat(columns) { col ->
-                    val index = row * columns + col
-                    Box(Modifier.weight(1f).aspectRatio(1f)) {
-                        when {
-                            index < visuals.size -> {
-                                val choice = visuals[index]
-                                val file = when (choice) {
-                                    is MediaChoice.Existing -> repository.files.resolve(choice.value.path)
-                                    is MediaChoice.New -> choice.value.pendingFile
-                                }
-                                val kind = when (choice) {
-                                    is MediaChoice.Existing -> choice.value.kind
-                                    is MediaChoice.New -> choice.value.kind
-                                }
-                                val isDragging = dragIndex == index
-                                Box(
-                                    Modifier
-                                        .fillMaxSize()
-                                        .graphicsLayer {
-                                            if (isDragging) {
-                                                scaleX = 1.05f
-                                                scaleY = 1.05f
-                                                translationX = dragOffset.x
-                                                translationY = dragOffset.y
-                                                shadowElevation = 12f
-                                                alpha = 0.92f
-                                            }
-                                        }
-                                        .pointerInput(index, visuals.size) {
-                                            detectDragGesturesAfterLongPress(
-                                                onDragStart = {
-                                                    dragIndex = index
-                                                    dragOffset = androidx.compose.ui.geometry.Offset.Zero
-                                                },
-                                                onDrag = { change, amount ->
-                                                    change.consume()
-                                                    dragOffset += amount
-                                                    // 拖过半格时与目标格交换
-                                                    val cell = size.width.toFloat()
-                                                    val from = dragIndex
-                                                    if (from >= 0 && from < visuals.size) {
-                                                        val dx = dragOffset.x
-                                                        val dy = dragOffset.y
-                                                        val col = from % columns
-                                                        val rowI = from / columns
-                                                        var target = -1
-                                                        when {
-                                                            dx > cell * 0.5f && col < columns - 1 &&
-                                                                (rowI * columns + col + 1) < visuals.size -> target = from + 1
-                                                            dx < -cell * 0.5f && col > 0 -> target = from - 1
-                                                            dy > cell * 0.5f && (rowI + 1) * columns + col < visuals.size -> target = from + columns
-                                                            dy < -cell * 0.5f && rowI > 0 -> target = from - columns
-                                                        }
-                                                        if (target in visuals.indices && target != from) {
-                                                            val item = visuals.removeAt(from)
-                                                            visuals.add(target, item)
-                                                            dragIndex = target
-                                                            dragOffset = androidx.compose.ui.geometry.Offset.Zero
-                                                        }
-                                                    }
-                                                },
-                                                onDragEnd = { dragIndex = -1; dragOffset = androidx.compose.ui.geometry.Offset.Zero },
-                                                onDragCancel = { dragIndex = -1; dragOffset = androidx.compose.ui.geometry.Offset.Zero },
-                                            )
-                                        }
-                                ) {
-                                    MediaThumbnail(file, kind, Modifier.fillMaxSize())
-                                    Text("×",
-                                        Modifier
-                                            .align(Alignment.TopEnd)
-                                            .padding(4.dp)
-                                            .background(Color(0x66000000), RoundedCornerShape(50))
-                                            .clickable { onRemove(index) }
-                                            .padding(horizontal = 7.dp, vertical = 2.dp),
-                                        color = Color.White, fontSize = 14.sp)
-                                }
-                            }
-                            canAdd && index == visuals.size -> {
-                                Surface(
-                                    Modifier.fillMaxSize().clickable(onClick = onAdd),
-                                    shape = RoundedCornerShape(10.dp),
-                                    color = Color(0xFFF3F3F3),
-                                    border = BorderStroke(1.dp, Color(0xFFE0E0E0)),
-                                ) {
-                                    Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.Center) {
-                                        Icon(Icons.Default.Add, null, tint = Color(0xFF999999), modifier = Modifier.size(36.dp))
-                                        Text(stringResource(R.string.editor_media_section), color = Color(0xFF999999), fontSize = 12.sp)
-                                        Text(
-                                            stringResource(R.string.editor_media_counter, visuals.size),
-                                            color = Color(0xFFBBBBBB), fontSize = 11.sp,
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+    MediaGrid(
+        cells = visuals.map { choice ->
+            when (choice) {
+                is MediaChoice.Existing -> MediaCellInput(
+                    file = repository.files.resolve(choice.value.path),
+                    kind = choice.value.kind,
+                    motionVideo = choice.value.motionVideoPath?.let { repository.files.resolve(it) },
+                )
+                is MediaChoice.New -> MediaCellInput(choice.value.pendingFile, choice.value.kind)
             }
-        }
-    }
+        },
+        canAdd = visuals.size < EntryRules.MAX_VISUALS,
+        onAdd = onAdd,
+        onRemove = onRemove,
+        onMove = { from, to -> visuals.add(to, visuals.removeAt(from)) },
+        addContent = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Icon(Icons.Default.Add, null, tint = Color(0xFF999999), modifier = Modifier.size(36.dp))
+                Text(stringResource(R.string.editor_media_section), color = Color(0xFF999999), fontSize = 12.sp)
+                Text(
+                    stringResource(R.string.editor_media_counter, visuals.size),
+                    color = Color(0xFFBBBBBB), fontSize = 11.sp,
+                )
+            }
+        },
+    )
 }
