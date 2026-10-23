@@ -9,6 +9,8 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.background
@@ -464,11 +466,12 @@ fun ImprintsApp(
         },
         bottomBar = {
             // 底部顺序固定「印迹 · 回顾 · 时光邮箱」；二级页隐藏底部导航。
-            // 印迹首页滚动时与顶部一起收放，把高度让给内容。
+            // 印迹首页滚动时与顶部一起收起 —— 这里必须用「滑出」而不是「收缩高度」：
+            // 改高度会让内容区在滚动中途变高/变矮，滑到底时最后一条记录会被挤出去。
             if (topLevelPage && !locked) AnimatedVisibility(
                 visible = chromeVisible,
-                enter = expandVertically(animationSpec = tween(180)) + fadeIn(animationSpec = tween(180)),
-                exit = shrinkVertically(animationSpec = tween(180)) + fadeOut(animationSpec = tween(120)),
+                enter = slideInVertically(animationSpec = tween(180)) { it } + fadeIn(animationSpec = tween(180)),
+                exit = slideOutVertically(animationSpec = tween(180)) { it } + fadeOut(animationSpec = tween(120)),
             ) {
             NavigationBar(containerColor = MaterialTheme.colorScheme.background) {
                 // 选中态必须显式给色：默认走 Material3 的 onSecondaryContainer（深灰），

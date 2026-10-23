@@ -221,7 +221,11 @@ fun TimelinePage(
                 lastOffset = offset
                 // 注意方向：firstVisibleItemScrollOffset 增大 = 内容被手指往上推（在看更新的记录）
                 // → 收起 chrome；减小 = 往回翻 → 立即展开。
-                if (delta > 4) onChromeChange(false) else if (delta < -4) onChromeChange(true)
+                //
+                // 但滚到两端后的 overscroll 回弹也会产生反向 delta，若不拦住，
+                // 滑到底部时 chrome 会「自己弹出来」，把最后一条记录重新挤出去。
+                if (delta > 4 && listState.canScrollForward) onChromeChange(false)
+                else if (delta < -4 && listState.canScrollBackward) onChromeChange(true)
             }
     }
 
