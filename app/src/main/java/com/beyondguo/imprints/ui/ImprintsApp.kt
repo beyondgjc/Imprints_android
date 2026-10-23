@@ -407,7 +407,6 @@ fun ImprintsApp(
     }
     val topLevelPage = page == Page.Timeline || page == Page.Review || page == Page.Mail
     val ownHeader = topLevelPage || page is Page.Editor || page is Page.LetterEditor || page is Page.ReviewWizard
-    var showFabMenu by remember { mutableStateOf(false) }
     // 顶部 chrome 与底部 tab 是否显示；由印迹首页的滚动方向驱动（下滑收起、上滑回来）
     var chromeVisible by remember { mutableStateOf(true) }
     // 切页时恢复显示，避免从别处回到首页还是隐藏状态
@@ -552,7 +551,7 @@ fun ImprintsApp(
                 exit = scaleOut(animationSpec = tween(150)) + fadeOut(animationSpec = tween(120)),
             ) {
                 FloatingActionButton(
-                    onClick = { showFabMenu = true }, shape = CircleShape, containerColor = Green,
+                    onClick = { page = Page.Editor(null) }, shape = CircleShape, containerColor = Green,
                     contentColor = Color.White) { Icon(Icons.Default.Add, editorNewTitle) }
             }
             Page.Mail -> FloatingActionButton(
@@ -1046,21 +1045,6 @@ fun ImprintsApp(
         )
     }
     // FAB「＋」：记录印迹 / 给未来写信（ML-01 入口）
-    if (!locked && showFabMenu) AlertDialog(
-        onDismissRequest = { showFabMenu = false },
-        title = { Text(stringResource(R.string.editor_new_title)) },
-        text = {
-            Column {
-                TextButton(onClick = { showFabMenu = false; page = Page.Editor(null) }) {
-                    Text(stringResource(R.string.action_record_imprint), color = Ink, fontSize = 15.sp)
-                }
-                TextButton(onClick = { showFabMenu = false; page = Page.LetterEditor(null, null) }) {
-                    Text(stringResource(R.string.mail_write), color = Green, fontSize = 15.sp)
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = { showFabMenu = false }) { Text(stringResource(R.string.action_cancel)) } },
-    )
     if (!locked && confirmDisableFeeling) AlertDialog(
         onDismissRequest = { confirmDisableFeeling = false },
         title = { Text(stringResource(R.string.disable_feeling_title)) },
