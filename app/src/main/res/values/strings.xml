@@ -459,7 +459,7 @@
     <string name="review_pick_title">选择关联的印迹</string>
     <string name="review_pick_done">完成</string>
     <string name="review_need_content">写点什么，或至少关联一条记录</string>
-    <string name="review_title_optional">标题（可不填）</string>
+    <string name="review_title_optional">标题</string>
     <string name="review_this_time">回顾这段时光</string>
     <string name="review_media_images">补充图片 %1$d/9</string>
     <string name="review_media_add_image">图片</string>
@@ -487,7 +487,7 @@
     <string name="review_closing">结语（可不填）</string>
     <string name="review_save">保存回顾</string>
     <string name="review_saved">回顾已保存</string>
-    <string name="review_title_hint">标题（可不填）</string>
+    <string name="review_title_hint">标题</string>
     <string name="review_source_entry">查看原印迹</string>
     <string name="review_source_letter">来自时光邮箱</string>
     <string name="review_source_recycled">来源已移入回收站</string>

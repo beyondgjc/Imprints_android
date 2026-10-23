@@ -614,13 +614,19 @@ fun ReviewWizardPage(
                             if (letterCount > 0) Text(stringResource(R.string.review_stat_letters) + "：" + letterCount, color = Ink, fontSize = 14.sp)
                         }
                     }
+                    // 标题：无边框，靠字号与留白区分层级（对齐印迹编辑/知乎的写法）
                     item {
-                        OutlinedTextField(
+                        TextField(
                             title, { title = it },
                             placeholder = { Text(stringResource(R.string.review_title_hint), color = Quiet) },
                             singleLine = true, modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green),
+                            textStyle = androidx.compose.ui.text.TextStyle(
+                                fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = Ink,
+                            ),
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
+                            ),
                         )
                     }
                     item {
@@ -637,12 +643,15 @@ fun ReviewWizardPage(
                         )
                     }
                     item {
-                        OutlinedTextField(
+                        TextField(
                             closingText, { closingText = it },
                             placeholder = { Text(stringResource(R.string.review_closing), color = Quiet) },
                             modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green),
+                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 15.sp, lineHeight = 24.sp, color = Ink),
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
+                            ),
                         )
                     }
                     item {
