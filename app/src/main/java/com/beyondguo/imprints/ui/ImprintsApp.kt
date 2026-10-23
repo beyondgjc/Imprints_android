@@ -108,7 +108,13 @@ private sealed interface Page {
     data class RecycleDetail(val id: String) : Page
     data class LetterEnvelope(val id: String) : Page
     data class LetterBody(val id: String) : Page
-    data class LetterEditor(val draftId: String?, val letterId: String?, val prefillBody: String = "") : Page
+    data class LetterEditor(
+        val draftId: String?,
+        val letterId: String?,
+        val prefillBody: String = "",
+        /** 预填送达时刻（毫秒）：从回顾「给下一阶段的自己写信」进来时，按总结的时间段长度推算 */
+        val prefillDeliverAtMs: Long? = null,
+    ) : Page
     data class ReviewWizard(val draftId: String) : Page
     data class ReviewDetail(val id: String, val inRecycle: Boolean = false) : Page
 }
@@ -855,6 +861,7 @@ fun ImprintsApp(
                     repository = letterRepository,
                     draftId = current.draftId,
                     prefillBody = current.prefillBody,
+                    prefillDeliverAtMs = current.prefillDeliverAtMs,
                     onSealed = {
                         scope.launch { snackbar.showSnackbar(letterSealed) }
                         page = Page.Mail
@@ -889,8 +896,11 @@ fun ImprintsApp(
                             }
                         }
                     },
-                    onWriteLetter = { closing ->
-                        page = Page.LetterEditor(null, null, prefillBody = closing)
+                    onWriteLetter = { closing, spanDays ->
+                        // 「给下一阶段的自己写信」：送达 = 现在 + 这段总结的天数，
+                        // 让"下一阶段"和刚回顾的这段等长（一个月的总结 → 一个月后收到）
+                        val deliverAt = System.currentTimeMillis() + spanDays * 24L * 60 * 60 * 1000
+                        page = Page.LetterEditor(null, null, prefillBody = closing, prefillDeliverAtMs = deliverAt)
                     },
                     onEdit = { openReviewEditor(current.id) },
                     onDelete = {

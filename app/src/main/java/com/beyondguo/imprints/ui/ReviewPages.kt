@@ -726,7 +726,8 @@ fun ReviewDetailPage(
     letterRepository: LetterRepository,
     reviewId: String,
     onOpenEntry: (String) -> Unit,
-    onWriteLetter: (String) -> Unit,
+    /** 参数 2 是这段总结覆盖的天数，用于给「下一阶段」定等长的送达时间 */
+    onWriteLetter: (String, Int) -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     report: (Throwable) -> Unit,
@@ -809,7 +810,15 @@ fun ReviewDetailPage(
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (!inRecycle) {
-                    OutlinedButton2(stringResource(R.string.review_write_letter)) { onWriteLetter(current.review.closingText) }
+                    OutlinedButton2(stringResource(R.string.review_write_letter)) {
+                        val spanDays = runCatching {
+                            java.time.temporal.ChronoUnit.DAYS.between(
+                                java.time.LocalDate.parse(current.review.startLocalDate),
+                                java.time.LocalDate.parse(current.review.endLocalDateInclusive),
+                            ).toInt() + 1
+                        }.getOrDefault(30).coerceAtLeast(1)
+                        onWriteLetter(current.review.closingText, spanDays)
+                    }
                 }
                 // 正常态：删除 = 移入回收站，7 天内可恢复
                 // 回收站态：已经删过一次了，这里只能是彻底删除（对齐印迹回收站的行为）

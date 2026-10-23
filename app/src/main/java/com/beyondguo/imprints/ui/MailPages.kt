@@ -574,6 +574,7 @@ fun LetterEditorPage(
     repository: LetterRepository,
     draftId: String?,
     prefillBody: String = "",
+    prefillDeliverAtMs: Long? = null,
     onSealed: (String) -> Unit,
     onCancel: () -> Unit,
     report: (Throwable) -> Unit,
@@ -586,7 +587,15 @@ fun LetterEditorPage(
     var body by remember(draftId) { mutableStateOf(prefillBody) }
     val mediaChoices: SnapshotStateList<MediaChoice> = remember(draftId) { mutableStateListOf() }
     var audio by remember(draftId) { mutableStateOf<LetterAttachment?>(null) }
-    var deliverMinute by remember(draftId) { mutableStateOf("") }
+    // 从回顾进来时预填送达时间（当前 + 总结的时间段长度）；有草稿时草稿值优先
+    var deliverMinute by remember(draftId) {
+        mutableStateOf(
+            prefillDeliverAtMs?.let {
+                java.time.Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault())
+                    .toLocalDateTime().format(MINUTE_FORMAT)
+            } ?: "",
+        )
+    }
     var notifyEnabled by remember(draftId) { mutableStateOf(true) }
     var loading by remember(draftId) { mutableStateOf(draftId != null) }
     var saving by remember { mutableStateOf(false) }
