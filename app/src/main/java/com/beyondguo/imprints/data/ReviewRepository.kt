@@ -50,6 +50,8 @@ data class ReviewDetail(
     val sources: List<ReviewSourceEntity>,
     val media: List<ReviewSourceMediaEntity>,
     val stats: ReviewStats,
+    /** 当前条件命中的候选（含完整详情），详情页的「这段时间的印迹」面板直接用 */
+    val candidates: List<ReviewCandidate> = emptyList(),
 )
 
 /** 更新预览（RV-06）：标出新增、移除、变化项，由用户选择后再保存。 */
@@ -192,9 +194,10 @@ class ReviewRepository(
             ReviewPeriods.parseDate(review.endLocalDateInclusive),
         )
         val tagIds = review.selectedTagIds.split(',').filter(String::isNotBlank).toSet()
-        val sources = candidates(range, tagIds).mapIndexed { index, candidate -> rowOf(review, candidate, index) }
+        val matched = candidates(range, tagIds)
+        val sources = matched.mapIndexed { index, candidate -> rowOf(review, candidate, index) }
         val media = sources.flatMap { mediaOf(it) }
-        return ReviewDetail(review, sources, media, statsOf(sources, media))
+        return ReviewDetail(review, sources, media, statsOf(sources, media), matched)
     }
 
     /** 把查询结果包装成「来源行」给 UI 用（纯视图对象，不落库）。 */

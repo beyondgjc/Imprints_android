@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MailOutline
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Home
@@ -219,6 +220,27 @@ fun ImprintsApp(
                 selectedTagIds = tagIds,
             )
             if (existing != null) sameScopeExistingId = existing.id else page = Page.ReviewWizard(draftId)
+        }
+    }
+
+    /** 打开已有总结的编辑器：先读一次详情，把范围、标签条件与手写内容装进草稿。 */
+    fun openReviewEditor(reviewId: String) {
+        scope.launch {
+            val detail = reviewRepository.detail(reviewId) ?: return@launch
+            val draftId = java.util.UUID.randomUUID().toString()
+            wizardDraft = ReviewDraft(
+                draftId = draftId,
+                reviewId = reviewId,
+                periodKind = detail.review.periodKind,
+                startLocalDate = detail.review.startLocalDate,
+                endLocalDateInclusive = detail.review.endLocalDateInclusive,
+                selectedTagIds = detail.review.selectedTagIds.split(',').filter(String::isNotBlank),
+                title = detail.review.title,
+                userBody = detail.review.userBody,
+                closingText = detail.review.closingText,
+                coverSourceKey = detail.review.coverSourceKey,
+            )
+            page = Page.ReviewWizard(draftId)
         }
     }
     val createBackup = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
@@ -421,6 +443,12 @@ fun ImprintsApp(
                     if (page is Page.Detail) {
                         TextButton(onClick = { page = Page.Editor((page as Page.Detail).id) }) {
                             Text(stringResource(R.string.action_edit), color = Green, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                    // 回顾详情：编辑挪到右上角，用图标（和印迹详情的文字按钮区分开，页面里不再重复放按钮）
+                    if (page is Page.ReviewDetail) {
+                        IconButton(onClick = { openReviewEditor((page as Page.ReviewDetail).id) }) {
+                            Icon(Icons.Default.Edit, stringResource(R.string.action_edit), tint = Ink)
                         }
                     }
                 },
@@ -863,30 +891,7 @@ fun ImprintsApp(
                     onWriteLetter = { closing ->
                         page = Page.LetterEditor(null, null, prefillBody = closing)
                     },
-                    onEdit = {
-                        scope.launch {
-                            val detail = reviewRepository.detail(current.id) ?: return@launch
-                            val draftId = java.util.UUID.randomUUID().toString()
-                            val sources = detail.sources
-                            wizardDraft = ReviewDraft(
-                                draftId = draftId,
-                                reviewId = current.id,
-                                periodKind = detail.review.periodKind,
-                                startLocalDate = detail.review.startLocalDate,
-                                endLocalDateInclusive = detail.review.endLocalDateInclusive,
-                                selectedTagIds = detail.review.selectedTagIds.split(',').filter(String::isNotBlank),
-                                title = detail.review.title,
-                                userBody = detail.review.userBody,
-                                closingText = detail.review.closingText,
-                                coverSourceKey = detail.review.coverSourceKey,
-                                includedKeys = sources.filter { it.included }.map { "${it.sourceKind}:${it.sourceId}" },
-                                featuredKeys = sources.filter { it.featured }
-                                    .sortedBy { it.featuredOrder }
-                                    .map { "${it.sourceKind}:${it.sourceId}" },
-                            )
-                            page = Page.ReviewWizard(draftId)
-                        }
-                    },
+                    onEdit = { openReviewEditor(current.id) },
                     onDelete = {
                         scope.launch { snackbar.showSnackbar(deleteDone) }
                         page = Page.Review

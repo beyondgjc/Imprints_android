@@ -734,6 +734,7 @@ fun ReviewDetailPage(
     var confirmDelete by remember { mutableStateOf(false) }
     var showAddLetter by remember { mutableStateOf(false) }
     var showUpdate by remember { mutableStateOf(false) }
+    var showEntries by remember { mutableStateOf(false) }
     var updatePreview by remember { mutableStateOf<com.beyondguo.imprints.data.ReviewUpdatePreview?>(null) }
     var addSelection by remember { mutableStateOf(emptySet<String>()) }
     var refreshSelection by remember { mutableStateOf(emptySet<String>()) }
@@ -775,69 +776,25 @@ fun ReviewDetailPage(
                 )
             }
         }
-        updatePreview?.let { preview ->
-            item {
-                OutlinePanel(Modifier.fillMaxWidth().clickable {
-                    addSelection = preview.added.map { it.key.toString() }.toSet()
-                    refreshSelection = preview.changed.map { it.first.toString() }.toSet()
-                    removeSelection = emptySet()
-                    showUpdate = true
-                }) {
-                    Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(stringResource(R.string.review_changed), Modifier.weight(1f), color = Green, fontSize = 14.sp)
-                        Text(stringResource(R.string.review_update), color = Green, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                    }
-                }
-            }
-        }
+        // 动态范围：不再有「来源记录有变化 / 更新回顾」（内容本来就是现读的），
+        // 也没有「精选片段」—— 成员就是这段时间命中的全部印迹，给一个入口看即可。
         item {
-            Text(stringResource(R.string.review_label_overview), color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-        }
-        item {
-            OutlinePanel(Modifier.fillMaxWidth()) {
-                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(stringResource(R.string.review_stat_entries) + "：" + current.stats.entryCount, color = Ink, fontSize = 14.sp)
-                    Text(stringResource(R.string.review_stat_days) + "：" + current.stats.recordDays, color = Ink, fontSize = 14.sp)
-                    Text(stringResource(R.string.review_stat_visuals) + "：" + current.stats.visualCount, color = Ink, fontSize = 14.sp)
-                    if (current.stats.letterCount > 0) {
-                        Text(stringResource(R.string.review_stat_letters) + "：" + current.stats.letterCount, color = Ink, fontSize = 14.sp)
-                    }
-                    if (current.stats.tagCounts.isNotEmpty()) {
-                        val names = current.review.tagNameSnapshot.split(',')
-                        val ids = current.review.selectedTagIds.split(',')
-                        Text(
-                            stringResource(R.string.review_stat_tags) + "：" + current.stats.tagCounts.joinToString("、") { (id, count) ->
-                                val index = ids.indexOf(id)
-                                (if (index in names.indices) names[index] else id) + " $count"
-                            },
-                            color = Ink, fontSize = 14.sp,
-                        )
-                    }
-                }
-            }
-        }
-        item { Text(stringResource(R.string.review_label_snippets), color = Ink, fontSize = 17.sp, fontWeight = FontWeight.Bold) }
-        items(current.sources.filter { it.featured && it.visibility == SourceVisibility.VISIBLE.name }, key = { "s-${it.sourceKind}-${it.sourceId}" }) { source ->
-            OutlinePanel(Modifier.fillMaxWidth()) {
-                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(source.eventDate, color = Quiet, fontSize = 12.sp)
-                    if (source.sourceKind == SourceKind.LETTER.name) {
-                        Text(stringResource(R.string.review_source_letter), color = Green, fontSize = 12.sp)
-                    }
-                    Text(source.bodySnapshot, color = Ink, fontSize = 15.sp, lineHeight = 23.sp, maxLines = 6)
-                    TextButton(onClick = {
-                        if (source.sourceKind == SourceKind.ENTRY.name) onOpenEntry(source.sourceId)
-                        else onOpenEntry(source.sourceId)
-                    }) { Text(stringResource(R.string.review_source_entry), color = Green, fontSize = 13.sp) }
-                }
-            }
-        }
-        items(current.sources.filter { it.visibility != SourceVisibility.VISIBLE.name }, key = { "h-${it.sourceKind}-${it.sourceId}" }) { source ->
-            OutlinePanel(Modifier.fillMaxWidth()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable(enabled = current.candidates.isNotEmpty()) { showEntries = true }
+                    .padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Text(
-                    if (source.visibility == SourceVisibility.RECYCLED.name) stringResource(R.string.review_source_recycled)
-                    else stringResource(R.string.review_source_purged),
-                    Modifier.padding(14.dp), color = Quiet, fontSize = 13.sp,
+                    stringResource(R.string.review_period_entries, current.candidates.size),
+                    Modifier.weight(1f), color = Ink, fontSize = 15.sp, fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    if (current.candidates.isEmpty()) stringResource(R.string.review_period_empty)
+                    else stringResource(R.string.review_view_all),
+                    color = Quiet, fontSize = 13.sp,
                 )
             }
         }
@@ -850,121 +807,16 @@ fun ReviewDetailPage(
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton2(stringResource(R.string.action_edit)) { onEdit() }
-                OutlinedButton2(stringResource(R.string.review_add_letter)) { showAddLetter = true }
-            }
-        }
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton2(stringResource(R.string.review_write_letter)) { onWriteLetter(current.review.closingText) }
-                OutlinedButton2(stringResource(R.string.action_delete_forever), danger = true) { confirmDelete = true }
+                // 删除 = 移入回收站，7 天内可恢复（RV-07）；不是「彻底删除」
+                OutlinedButton2(stringResource(R.string.action_delete), danger = true) { confirmDelete = true }
             }
         }
         item { Text(stringResource(R.string.review_delete_hint), color = Quiet, fontSize = 12.sp) }
     }
 
-    if (showUpdate) updatePreview?.let { preview ->
-        AlertDialog(
-            onDismissRequest = { showUpdate = false },
-            title = { Text(stringResource(R.string.review_update)) },
-            text = {
-                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (preview.added.isNotEmpty()) Text(stringResource(R.string.review_update_added), color = Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                    preview.added.forEach { candidate ->
-                        val key = candidate.key.toString()
-                        Row(Modifier.fillMaxWidth().clickable {
-                            addSelection = if (key in addSelection) addSelection - key else addSelection + key
-                        }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(if (key in addSelection) "☑ " else "☐ ", color = Green, fontSize = 16.sp)
-                            Text(candidate.entry.body.ifBlank { candidate.entry.eventLocalMinute.take(10) }, color = Ink, fontSize = 13.sp, maxLines = 1)
-                        }
-                    }
-                    if (preview.changed.isNotEmpty()) Text(stringResource(R.string.review_update_changed), color = Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                    preview.changed.forEach { (source, candidate) ->
-                        val key = source.toString()
-                        Row(Modifier.fillMaxWidth().clickable {
-                            refreshSelection = if (key in refreshSelection) refreshSelection - key else refreshSelection + key
-                        }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(if (key in refreshSelection) "☑ " else "☐ ", color = Green, fontSize = 16.sp)
-                            Text(candidate.entry.body.ifBlank { candidate.entry.eventLocalMinute.take(10) }, color = Ink, fontSize = 13.sp, maxLines = 1)
-                        }
-                    }
-                    if (preview.removed.isNotEmpty()) Text(stringResource(R.string.review_update_removed), color = Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                    preview.removed.forEach { source ->
-                        val key = source.toString()
-                        Row(Modifier.fillMaxWidth().clickable {
-                            removeSelection = if (key in removeSelection) removeSelection - key else removeSelection + key
-                        }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(if (key in removeSelection) "☑ " else "☐ ", color = Danger, fontSize = 16.sp)
-                            Text(source.bodySnapshot.ifBlank { source.eventDate }, color = Quiet, fontSize = 13.sp, maxLines = 1)
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showUpdate = false
-                    scope.launch {
-                        val review = reviewRepository.review(reviewId) ?: return@launch
-                        val range = DateRange(
-                            LocalDate.parse(review.startLocalDate),
-                            LocalDate.parse(review.endLocalDateInclusive),
-                        )
-                        runCatching {
-                            reviewRepository.applyUpdate(reviewId, preview, addSelection, refreshSelection, removeSelection, range)
-                        }.onSuccess {
-                            detail = reviewRepository.detail(reviewId)
-                            updatePreview = null
-                        }.onFailure(report)
-                    }
-                }) { Text(stringResource(R.string.review_update_apply)) }
-            },
-            dismissButton = { TextButton(onClick = { showUpdate = false }) { Text(stringResource(R.string.action_cancel)) } },
-        )
-    }
-    if (confirmDelete) AlertDialog(
-        onDismissRequest = { confirmDelete = false },
-        title = { Text(stringResource(R.string.action_delete_forever)) },
-        text = { Text(stringResource(R.string.review_delete_hint)) },
-        confirmButton = {
-            TextButton(onClick = {
-                confirmDelete = false
-                scope.launch {
-                    runCatching { reviewRepository.moveToRecycle(reviewId) }
-                        .onSuccess { onDelete() }.onFailure(report)
-                }
-            }) { Text(stringResource(R.string.recycle_type_review) + stringResource(R.string.envelope_delete)) }
-        },
-        dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text(stringResource(R.string.action_cancel)) } },
-    )
+    if (showEntries) ReviewEntriesSheet(current.candidates, coreRepository) { showEntries = false }
 
-    if (showAddLetter) {
-        val scope2 = rememberCoroutineScope()
-        var addable by remember { mutableStateOf(emptyList<LetterListRow>()) }
-        LaunchedEffect(Unit) { runCatching { reviewRepository.addableLetters() }.onSuccess { addable = it } }
-        AlertDialog(
-            onDismissRequest = { showAddLetter = false },
-            title = { Text(stringResource(R.string.review_add_letter)) },
-            text = {
-                Column {
-                    if (addable.isEmpty()) Text(stringResource(R.string.mail_empty_delivered_sub), color = Quiet, fontSize = 13.sp)
-                    addable.forEach { row ->
-                        TextButton(onClick = {
-                            scope2.launch {
-                                runCatching { reviewRepository.addLetterSource(reviewId, row.entryId) }
-                                    .onSuccess {
-                                        showAddLetter = false
-                                        scope.launch { runCatching { reviewRepository.detail(reviewId) }.onSuccess { detail = it } }
-                                    }
-                                    .onFailure(report)
-                            }
-                        }) { Text(stringResource(R.string.mail_letter_default_title) + " · " + formatLetterDate(row)) }
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { showAddLetter = false }) { Text(stringResource(R.string.action_cancel)) } },
-        )
-    }
 }
 
 /**
