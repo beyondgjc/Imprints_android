@@ -111,13 +111,6 @@ fun TimelinePage(
     onCreateTag: (String) -> Unit = {},
     onRenameTag: (String, String) -> Unit = { _, _ -> },
     onDeleteTag: (String) -> Unit = {},
-    /** 到期未读信（首页送达区）；不受标签筛选影响 */
-    reminderLetters: List<com.beyondguo.imprints.data.LetterListRow> = emptyList(),
-    reviewInvitation: Pair<String, com.beyondguo.imprints.review.DateRange>? = null,
-    onOpenEnvelope: (String) -> Unit = {},
-    onOpenMail: () -> Unit = {},
-    onOpenReviewInvitation: (String, com.beyondguo.imprints.review.DateRange) -> Unit = { _, _ -> },
-    onDismissReviewInvitation: (String, com.beyondguo.imprints.review.DateRange) -> Unit = { _, _ -> },
     /** 月份标题菜单：回顾这个月（带上当前标签筛选） */
     onReviewMonth: (String) -> Unit = {},
     onError: (Throwable) -> Unit = {},
@@ -209,13 +202,6 @@ fun TimelinePage(
                     Text(stringResource(R.string.timeline_title), Modifier.weight(1f), color = Ink, fontSize = 34.sp, fontWeight = FontWeight.Bold)
                     IconButton(onClick = onSettings) { Icon(Icons.Default.MoreVert, stringResource(R.string.a11y_settings), tint = Quiet) }
                 }
-                // 时光提醒：标题与标签筛选之间；送达卡随页面滚动，不遮挡正文
-                TimeReminderSection(
-                    invitation = reviewInvitation,
-                    entries = entries,
-                    onOpenInvitation = onOpenReviewInvitation,
-                    onDismissInvitation = onDismissReviewInvitation,
-                )
                 // 标签筛选：单行横向滚动，首位「全部」= 未筛选，行内只放内置标签，多选仍为叠加（OR）
                 TagFilterRow(
                     tags = chipTags,

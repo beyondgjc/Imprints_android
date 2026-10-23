@@ -262,7 +262,6 @@ fun ImprintsApp(
     val recycledLetters by letterRepository.recycledLetters.collectAsState(initial = emptyList())
     val recycledReviews by reviewRepository.recycledReviews.collectAsState(initial = emptyList())
     var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
-    var reviewInvitation by remember { mutableStateOf<Pair<String, com.beyondguo.imprints.review.DateRange>?>(null) }
     val today = java.time.LocalDate.now()
     // 前台到点也要更新状态：睡到下一封送达瞬间，最迟每 30 秒醒一次刷新相对文案
     LaunchedEffect(sealedLetters) {
@@ -277,14 +276,6 @@ fun ImprintsApp(
     LaunchedEffect(nowMs) {
         val newlyDue = runCatching { letterRepository.refreshDeliveryState(nowMs) }.getOrDefault(emptyList())
         if (newlyDue.isNotEmpty()) runCatching { com.beyondguo.imprints.mail.LetterNotifier.notifyDue(context) }
-    }
-    // 回顾邀请：最近一个已结束且有印迹的周期（优先年、月、周），已保存/已关闭则不出现
-    LaunchedEffect(today, active.size, sealedLetters.size) {
-        reviewInvitation = runCatching {
-            reviewRepository.invitation(today)?.takeIf { (kind, range) ->
-                !reviewRepository.hasFullScopeReview(kind, range)
-            }
-        }.getOrNull()
     }
     // 通知点击进入：通过隐私同意与应用锁后才消费目标，且只带 ID 不带内容
     LaunchedEffect(pendingOpenMail, locked, initialized) {
@@ -592,18 +583,6 @@ fun ImprintsApp(
                                 .onSuccess { selectedTagIds = selectedTagIds - id }
                                 .onFailure(::report)
                         }
-                    },
-                    onOpenEnvelope = { page = Page.LetterEnvelope(it) },
-                    onOpenMail = { page = Page.Mail },
-                    reminderLetters = sealedLetters.filter {
-                        it.deliveryReadAtMs == null && com.beyondguo.imprints.mail.LetterRules.isDue(it.toEntity(), nowMs)
-                    },
-                    reviewInvitation = reviewInvitation,
-                    onOpenReviewInvitation = { kind, range ->
-                        startWizard(kind, range.start.toString(), range.endInclusive.toString(), selectedTagIds.toList())
-                    },
-                    onDismissReviewInvitation = { kind, range ->
-                        scope.launch { runCatching { reviewRepository.closeInvitation(kind, range) } }
                     },
                     onReviewMonth = { month ->
                         val range = com.beyondguo.imprints.review.ReviewPeriods.monthOf(
