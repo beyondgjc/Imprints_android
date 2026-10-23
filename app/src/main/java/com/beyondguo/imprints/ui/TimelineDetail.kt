@@ -211,11 +211,8 @@ fun TimelinePage(
                 }
                 // 时光提醒：标题与标签筛选之间；送达卡随页面滚动，不遮挡正文
                 TimeReminderSection(
-                    letters = reminderLetters,
                     invitation = reviewInvitation,
                     entries = entries,
-                    onOpenEnvelope = onOpenEnvelope,
-                    onOpenMail = onOpenMail,
                     onOpenInvitation = onOpenReviewInvitation,
                     onDismissInvitation = onDismissReviewInvitation,
                 )
@@ -362,48 +359,21 @@ private fun displayMonth(value: String): String {
 }
 
 /**
- * 首页「时光提醒」区（01 §3）：
- * 到期未读信的送达卡优先，其下是回顾邀请；都没有时不预留空白。
- * 送达区不受标签筛选影响，「置顶」只是内容顺序在顶部，不做遮挡正文的悬浮层。
+ * 首页「时光提醒」区（01 §3）：**只放回顾邀请**。
+ *
+ * V0.2 起印迹首页不再展示信件到达卡／聚合卡／置顶（01 §3 / D19）：
+ * 到期未读只靠「系统通知 + 时光邮箱底栏未读徽标」提示，阅读成功才递减徽标。
+ * 这样首页保持"纯个人记录"的语义，不被未读信打断。
  */
 @Composable
 private fun TimeReminderSection(
-    letters: List<com.beyondguo.imprints.data.LetterListRow>,
     invitation: Pair<String, com.beyondguo.imprints.review.DateRange>?,
     entries: List<EntryEntity>,
-    onOpenEnvelope: (String) -> Unit,
-    onOpenMail: () -> Unit,
     onOpenInvitation: (String, com.beyondguo.imprints.review.DateRange) -> Unit,
     onDismissInvitation: (String, com.beyondguo.imprints.review.DateRange) -> Unit,
 ) {
-    if (letters.isEmpty() && invitation == null) return
+    if (invitation == null) return
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (letters.isNotEmpty()) {
-            val latest = letters.maxByOrNull { it.deliverAtMs }!!
-            val deliverDate = stringResource(
-                R.string.format_date_md,
-                latest.deliverLocalMinute.substring(5, 7).toInt(),
-                latest.deliverLocalMinute.substring(8, 10).toInt(),
-            )
-            OutlinePanel(Modifier.fillMaxWidth()) {
-                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (letters.size == 1) {
-                        Text(stringResource(R.string.home_letter_from_past), color = Green, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                        Text(stringResource(R.string.mail_deliver_on, deliverDate), color = Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                        Button(onClick = { onOpenEnvelope(latest.entryId) }, shape = RoundedCornerShape(12.dp)) {
-                            Text(stringResource(R.string.home_letter_open))
-                        }
-                    } else {
-                        Text(stringResource(R.string.home_letter_multi, letters.size), color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                        Text(stringResource(R.string.mail_deliver_on, deliverDate), color = Quiet, fontSize = 12.sp)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(onClick = { onOpenEnvelope(latest.entryId) }) { Text(stringResource(R.string.home_letter_open), color = Green) }
-                            TextButton(onClick = onOpenMail) { Text(stringResource(R.string.home_letter_view_all), color = Quiet) }
-                        }
-                    }
-                }
-            }
-        }
         invitation?.let { (kind, range) ->
             val count = entries.count { entry ->
                 runCatching { ReviewPeriods.parseDate(entry.eventLocalMinute) }.getOrNull()?.let { range.contains(it) } == true
