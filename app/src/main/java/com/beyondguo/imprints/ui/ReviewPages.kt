@@ -74,6 +74,8 @@ import com.beyondguo.imprints.data.ReviewDetail
 import com.beyondguo.imprints.data.ReviewDraft
 import com.beyondguo.imprints.data.ReviewEntity
 import com.beyondguo.imprints.data.MediaFiles
+import com.beyondguo.imprints.data.MediaChoice
+import com.beyondguo.imprints.data.AudioChoice
 import com.beyondguo.imprints.data.MediaItem
 import com.beyondguo.imprints.data.ReviewRepository
 import com.beyondguo.imprints.data.SourceKey
@@ -96,6 +98,15 @@ private enum class ReviewHomeTab { SAVED, DRAFTS }
 fun ReviewHomePage(
     reviewRepository: ReviewRepository,
     coreRepository: ImprintRepository,
+    /** 滚动位置由导航层持有：从总结详情返回时仍停在原来的位置，不回到顶部 */
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    /**
+     * 列表数据也由导航层持有。
+     * 之前在这里 collectAsState(initial = emptyList())，切页重建时第一帧是空列表，
+     * LazyListState 的索引会被夹回 0 —— 光提升 listState 是不够的。
+     */
+    reviews: List<com.beyondguo.imprints.data.ReviewEntity>,
+    drafts: List<com.beyondguo.imprints.data.ContentDraftEntity>,
     nowDate: LocalDate,
     onStartWizard: (String, String, String, List<String>) -> Unit,
     onOpenReview: (String) -> Unit,
@@ -104,8 +115,6 @@ fun ReviewHomePage(
     report: (Throwable) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val reviews by reviewRepository.activeReviews.collectAsState(initial = emptyList())
-    val drafts by reviewRepository.reviewDrafts.collectAsState(initial = emptyList())
     val tagList by coreRepository.selectableTags.collectAsState(initial = emptyList())
     var kind by remember { mutableStateOf(PeriodKind.MONTH.name) }
     var rangeShift by remember { mutableStateOf(0) }
@@ -262,6 +271,7 @@ fun ReviewHomePage(
 
         LazyColumn(
             Modifier.fillMaxSize().padding(horizontal = 22.dp),
+            state = listState,
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(bottom = 32.dp),
         ) {
@@ -792,6 +802,13 @@ fun ReviewDetailPage(
                 )
             }
         }
+        // 用户写的正文放最前：先读他的话，再看他自己补充的素材，最后才是动态范围内的印迹
+        if (current.review.userBody.isNotBlank()) {
+            item { Text(current.review.userBody, color = Ink, fontSize = 16.sp, lineHeight = 26.sp) }
+        }
+        if (current.review.closingText.isNotBlank()) {
+            item { Text(current.review.closingText, color = Green, fontSize = 15.sp, lineHeight = 24.sp) }
+        }
         // 回顾自有素材：先手写总结与补充素材，最后才是动态范围内的印迹（RV-03 §3.1）
         run {
             val ownVisuals = current.ownPaths.filter { MediaItem.of(it).kind != "AUDIO" }
@@ -829,12 +846,6 @@ fun ReviewDetailPage(
                     color = Quiet, fontSize = 13.sp,
                 )
             }
-        }
-        if (current.review.userBody.isNotBlank()) {
-            item { Text(current.review.userBody, color = Ink, fontSize = 16.sp, lineHeight = 26.sp) }
-        }
-        if (current.review.closingText.isNotBlank()) {
-            item { Text(current.review.closingText, color = Green, fontSize = 15.sp, lineHeight = 24.sp) }
         }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -974,15 +985,44 @@ fun ReviewEditorPage(
     var saving by remember { mutableStateOf(false) }
     var showEntries by remember { mutableStateOf(false) }
     // 回顾自有附件：图片（≤9）与声音（≤1）。选中即落盘，避免 pending 生命周期管理
-    var visuals by remember { mutableStateOf(initialDraft?.visuals ?: emptyList()) }
-    var audio by remember { mutableStateOf(initialDraft?.audio) }
+    // 与编辑印迹同一套生命周期：选中的图先留在 pending 暂存区（MediaChoice.New），
+    // 只有保存/存草稿时才 commit 转正并登记引用。这样文件一进 media/ 就有主，
+    // 不会被每日清理任务当成孤儿删掉（上一版的 bug 就出在"选中即转正"）。
+    var visuals by remember {
+        mutableStateOf<List<MediaChoice>>(initialDraft?.visuals?.map { MediaChoice.Existing(it) } ?: emptyList())
+    }
+    var audio by remember {
+        mutableStateOf<AudioChoice?>(initialDraft?.audio?.let { AudioChoice.Existing(it) })
+    }
     var showAudioSheet by remember { mutableStateOf(false) }
 
-    fun attach(prepared: com.beyondguo.imprints.data.PreparedMedia) = MediaItem(
-        path = repository.files.commit(prepared),
-        kind = prepared.kind, mime = prepared.mime,
-        byteLength = prepared.byteLength, sha256 = prepared.sha256,
-    )
+    /** 把暂存区里的附件转正：commit 落盘，状态换成 Existing（幂等，重复调不会重复 commit） */
+    fun commitAttachments() {
+        visuals = visuals.map { choice ->
+            if (choice is MediaChoice.New) {
+                val p = choice.value
+                MediaChoice.Existing(
+                    MediaItem(
+                        path = repository.files.commit(p), kind = p.kind, mime = p.mime,
+                        byteLength = p.byteLength, sha256 = p.sha256,
+                        motionVideoPath = p.motionVideoId,
+                    ),
+                )
+            } else {
+                choice
+            }
+        }
+        audio = when (val a = audio) {
+            is AudioChoice.New -> {
+                val p = a.value
+                AudioChoice.Existing(MediaItem(repository.files.commit(p), p.kind, p.mime, p.byteLength, p.sha256))
+            }
+            else -> a
+        }
+    }
+
+    fun existingVisuals(): List<MediaItem> = visuals.mapNotNull { (it as? MediaChoice.Existing)?.value }
+    fun existingAudio(): MediaItem? = (audio as? AudioChoice.Existing)?.value
 
     val imagePicker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(9),
@@ -990,7 +1030,7 @@ fun ReviewEditorPage(
         scope.launch {
             uris.take(9 - visuals.size).forEach { uri ->
                 runCatching { repository.files.prepare(uri) }
-                    .onSuccess { visuals = visuals + attach(it) }
+                    .onSuccess { visuals = visuals + MediaChoice.New(it) }
                     .onFailure(report)
             }
         }
@@ -999,7 +1039,7 @@ fun ReviewEditorPage(
         if (uri == null) return
         scope.launch {
             runCatching { repository.files.prepare(uri, audio = true) }
-                .onSuccess { audio = attach(it) }
+                .onSuccess { audio = AudioChoice.New(it) }
                 .onFailure(report)
         }
     }
@@ -1043,6 +1083,8 @@ fun ReviewEditorPage(
 
     fun buildDraft(): ReviewDraft? {
         val r = range ?: return null
+        // 落笔前统一把暂存区的附件转正：commit 进 media/，紧接着 save/saveDraft 会写引用
+        commitAttachments()
         return ReviewDraft(
             draftId = draftId,
             reviewId = initialDraft?.reviewId,
@@ -1052,8 +1094,8 @@ fun ReviewEditorPage(
             selectedTagIds = emptyList(),
             title = title,
             userBody = body,
-            visuals = visuals,
-            audio = audio,
+            visuals = existingVisuals(),
+            audio = existingAudio(),
         )
     }
 
@@ -1114,29 +1156,58 @@ fun ReviewEditorPage(
                     ReviewDateField(stringResource(R.string.review_as_of_today), endText, { editingRange = 2 }, Modifier.weight(1f))
                 }
             }
+            // 标题与正文合到同一个 item，间距自己控（10dp）：
+            // LazyColumn 的 12dp 太散；贴太近又挤，10dp 是标题字号 20/正文 17 下的舒适值。
             item {
-                OutlinedTextField(
-                    title, { title = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text(stringResource(R.string.review_title_optional), color = Quiet) },
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green),
-                )
-            }
-            item {
-                OutlinedTextField(
-                    body, { body = it },
-                    // 用高度区间而不是 weight：weight 会把剩余空间吃光，把下面的内容挤出可视区
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 150.dp, max = 300.dp),
-                    placeholder = { Text(stringResource(R.string.review_write_hint), color = Quiet) },
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(unfocusedBorderColor = Line, focusedBorderColor = Green),
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = title,
+                        onValueChange = { title = it },
+                        singleLine = true,
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = Ink,
+                        ),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(Green),
+                        modifier = Modifier.fillMaxWidth(),
+                        decorationBox = { inner ->
+                            if (title.isEmpty()) {
+                                Text(
+                                    stringResource(R.string.review_title_optional),
+                                    color = Quiet, fontSize = 20.sp, fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                            inner()
+                        },
+                    )
+                    androidx.compose.foundation.text.BasicTextField(
+                        value = body,
+                        onValueChange = { body = it },
+                        textStyle = androidx.compose.ui.text.TextStyle(fontSize = 17.sp, lineHeight = 27.sp, color = Ink),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(Green),
+                        // 用高度区间而不是 weight：weight 会把剩余空间吃光，把下面的内容挤出可视区
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 300.dp),
+                        decorationBox = { inner ->
+                            if (body.isEmpty()) {
+                                Text(
+                                    stringResource(R.string.review_write_hint),
+                                    color = Quiet, fontSize = 17.sp, lineHeight = 27.sp,
+                                )
+                            }
+                            inner()
+                        },
+                    )
+                }
             }
             // 补充素材（RV-01）：**布局与编辑印迹完全一致** ——
             // 九宫格的「＋」格负责添加（没有额外的标题行/按钮），声音用同一个 EditorMetaRow。
             item {
                 MediaGrid(
-                    cells = visuals.map { MediaCellInput(repository.files.resolve(it.path), it.kind) },
+                    cells = visuals.map { choice ->
+                        when (choice) {
+                            is MediaChoice.Existing -> MediaCellInput(repository.files.resolve(choice.value.path), choice.value.kind)
+                            is MediaChoice.New -> MediaCellInput(choice.value.pendingFile, choice.value.kind)
+                        }
+                    },
                     canAdd = visuals.size < 9,
                     onAdd = {
                         imagePicker.launch(
@@ -1169,7 +1240,11 @@ fun ReviewEditorPage(
                         trailing = EditorMetaTrailing.Chevron,
                     )
                 } else {
-                    val file = repository.files.resolve(audio!!.path)
+                    val file = when (val a = audio) {
+                        is AudioChoice.Existing -> repository.files.resolve(a.value.path)
+                        is AudioChoice.New -> a.value.pendingFile
+                        null -> return@item
+                    }
                     EditorAudioSelectedRow(
                         file = file,
                         displayName = friendlyAudioName(file.nameWithoutExtension),

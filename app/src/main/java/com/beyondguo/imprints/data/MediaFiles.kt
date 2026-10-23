@@ -188,10 +188,18 @@ class MediaFiles(private val context: Context) {
     }
 
     suspend fun cleanup(referenced: Set<String>) = withContext(Dispatchers.IO) {
-        val staleBefore = System.currentTimeMillis() - 24L * 60 * 60 * 1000
+        val now = System.currentTimeMillis()
+        val staleBefore = now - 24L * 60 * 60 * 1000
         pending.listFiles()?.forEach { if (it.isFile && it.lastModified() < staleBefore) it.delete() }
         root.listFiles()?.forEach { file ->
-            if (file.isFile && file.name !in referenced) file.delete()
+            // 「刚放进来、引用还没登记」是一个真实存在的窗口期：选图后文件已落盘，
+            // 但 media_references 要等保存或存草稿才写。这段时间里任何清理都会误删。
+            // 1 小时内写入的文件一律跳过；同时把每次删除打出来，便于定位是谁触发的。
+            val fresh = now - file.lastModified() < 60L * 60 * 1000
+            if (file.isFile && file.name !in referenced && !fresh) {
+                android.util.Log.w("MediaCleanup", "delete ${file.name} refs=${referenced.size}")
+                file.delete()
+            }
         }
     }
 }

@@ -106,6 +106,9 @@ fun MediaThumbnail(
     val appLocked = LocalImprintsLocked.current
     var open by remember(file.path) { mutableStateOf(false) }
     val hasMotion = motionVideo != null && motionVideo.isFile
+    // 解码失败要能看见原因：以前 runCatching 全吞了，界面上只剩一个「图片」占位，
+    // 分不清是"还在解码"还是"这张解不出来"。
+    var decodeFailed by remember(file.path) { mutableStateOf(false) }
     val bitmap by produceState<Bitmap?>(null, file.path, hasMotion) {
         value = withContext(Dispatchers.IO) {
             runCatching {
@@ -114,18 +117,44 @@ fun MediaThumbnail(
                         retriever.setDataSource(file.path)
                         retriever.getScaledFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 512, 512)
                     }
+                } else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    // ImageDecoder 直接按目标尺寸采样，比 BitmapFactory 的 inSampleSize 更可控，
+                    // 也不会因为"先读 bounds 再重解"两条路径不一致而偶发失败。
+                    // ALLOCATOR_SOFTWARE：硬件位图交给 Compose 的 asImageBitmap 会踩坑。
+                    android.graphics.ImageDecoder.decodeBitmap(
+                        android.graphics.ImageDecoder.createSource(file),
+                    ) { decoder, info, _ ->
+                        decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+                        val longest = maxOf(info.size.width, info.size.height)
+                        decoder.setTargetSampleSize(maxOf(1, longest / 512))
+                    }
                 } else {
                     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                     BitmapFactory.decodeFile(file.path, bounds)
-                    val sample = maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / 512)
-                    BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
+                    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+                        android.util.Log.w("MediaThumb", "bounds=0 path=${file.path} exists=${file.exists()} len=${file.length()}")
+                        null
+                    } else {
+                        val sample = maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / 512)
+                        BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
+                    }
                 }
+            }.onFailure {
+                android.util.Log.w("MediaThumb", "decode threw path=${file.path} exists=${file.exists()}", it)
             }.getOrNull()
         }
+        decodeFailed = value == null
     }
     Box(modifier.clip(RoundedCornerShape(10.dp)).background(Color(0xFFE7F4EE))
         .clickable { open = true }, contentAlignment = Alignment.Center) {
-        if (bitmap == null) Text(if (kind == "VIDEO") stringResource(R.string.media_kind_video) else stringResource(R.string.media_kind_image), color = Quiet)
+        if (bitmap == null) Text(
+            when {
+                decodeFailed -> stringResource(R.string.media_kind_failed)
+                kind == "VIDEO" -> stringResource(R.string.media_kind_video)
+                else -> stringResource(R.string.media_kind_image)
+            },
+            color = Quiet,
+        )
         else Image(bitmap!!.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         if (kind == "VIDEO" || hasMotion) Surface(shape = CircleShape, color = Color(0xB3222830)) {
             Icon(Icons.Default.PlayArrow, null, Modifier.padding(5.dp), tint = Color.White)

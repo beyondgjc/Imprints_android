@@ -289,6 +289,7 @@
     <string name="section_about">关于</string>
     <string name="action_import">导入</string>
     <string name="media_kind_video">视频</string>
+    <string name="media_kind_failed">无法显示</string>
     <string name="media_kind_image">图片</string>
     <string name="a11y_settings">设置</string>
     <string name="a11y_search">搜索</string>

@@ -97,7 +97,10 @@ class ImprintRepository(
     suspend fun deleteFilesIfUnreferenced(paths: Collection<String>) {
         if (paths.isEmpty()) return
         val refs = referencedPaths()
-        paths.filter { it !in refs }.forEach { path -> runCatching { files.resolve(path).delete() } }
+        paths.filter { it !in refs }.forEach { path ->
+            android.util.Log.w("MediaCleanup", "deleteFileIfUnreferenced $path refs=${refs.size}")
+            runCatching { files.resolve(path).delete() }
+        }
     }
 
     /** 登记某个对象对一组文件的所有权（整体替换语义）。 */

@@ -413,6 +413,11 @@ fun ImprintsApp(
     val ownHeader = topLevelPage || page is Page.Editor || page is Page.LetterEditor || page is Page.ReviewWizard
     // 顶部 chrome 与底部 tab 是否显示；由印迹首页的滚动方向驱动（下滑收起、上滑回来）
     var chromeVisible by remember { mutableStateOf(true) }
+    // 回顾列表的滚动位置：放在导航层，进出总结详情后回来还停在原位
+    val reviewListState = androidx.compose.foundation.lazy.rememberLazyListState()
+    // 回顾列表数据也在导航层订阅：页面重建时不会先经历一帧空列表而被夹回顶部
+    val reviewListData by reviewRepository.activeReviews.collectAsState(initial = emptyList())
+    val reviewDraftData by reviewRepository.reviewDrafts.collectAsState(initial = emptyList())
     // 切页时恢复显示，避免从别处回到首页还是隐藏状态
     LaunchedEffect(page) { chromeVisible = true }
     val unreadLetters = sealedLetters.count {
@@ -630,6 +635,9 @@ fun ImprintsApp(
                     ReviewHomePage(
                         reviewRepository = reviewRepository,
                         coreRepository = repository,
+                        listState = reviewListState,
+                        reviews = reviewListData,
+                        drafts = reviewDraftData,
                         nowDate = today,
                         onStartWizard = ::startWizard,
                         onOpenReview = { page = Page.ReviewDetail(it) },

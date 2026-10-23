@@ -156,7 +156,7 @@ class ReviewRepository(
             ),
         )
         // 附件所有权跟着草稿走：DRAFT 名下，未保存为正式总结前不归总结所有
-        core.registerMediaOwner(OWNER_DRAFT, draftId, draft.visuals.map { it.path } + draft.audio?.path.orEmpty())
+        core.registerMediaOwner(OWNER_DRAFT, draftId, draft.visuals.map { it.path } + listOfNotNull(draft.audio?.path))
     }
 
     suspend fun draft(id: String): ReviewDraft? =
@@ -212,7 +212,9 @@ class ReviewRepository(
         val sources = matched.mapIndexed { index, candidate -> rowOf(review, candidate, index) }
         val media = sources.flatMap { mediaOf(it) }
         // 回顾自己的附件：所有权在 REVIEW 名下（RV-01「回顾补充素材」），与关联印迹的媒体两回事
-        val ownPaths = mailDao.mediaRefPathsOwnedBy(OWNER_REVIEW, review.id)
+        // 过滤空白：早期版本可能写进空路径（audio 为 null 时 orEmpty 塞了空串），
+        // resolve("") 会直接抛 IllegalArgumentException 把详情页打崩
+        val ownPaths = mailDao.mediaRefPathsOwnedBy(OWNER_REVIEW, review.id).filter { it.isNotBlank() }
         return ReviewDetail(review, sources, media, statsOf(sources, media), matched, ownPaths)
     }
 
@@ -359,7 +361,7 @@ class ReviewRepository(
             //
             // 回顾自有附件：所有权从草稿（DRAFT）转到总结（REVIEW）名下，
             // 之后删总结才清理这些文件；草稿名下的记录一并清掉。
-            val ownPaths = draft.visuals.map { it.path } + draft.audio?.path.orEmpty()
+            val ownPaths = draft.visuals.map { it.path } + listOfNotNull(draft.audio?.path)
             core.registerMediaOwner(OWNER_REVIEW, reviewId, ownPaths)
             draft.draftId?.let { core.registerMediaOwner(OWNER_DRAFT, it, emptyList()) }
         }
