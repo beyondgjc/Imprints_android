@@ -9,6 +9,8 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
@@ -543,9 +545,16 @@ fun ImprintsApp(
         },
         snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = { when (page) {
-            Page.Timeline -> FloatingActionButton(
-                onClick = { showFabMenu = true }, shape = CircleShape, containerColor = Green,
-                contentColor = Color.White) { Icon(Icons.Default.Add, editorNewTitle) }
+            // 下滑看内容时 FAB 跟着顶栏一起收起，避免一直挡着记录
+            Page.Timeline -> AnimatedVisibility(
+                visible = chromeVisible,
+                enter = scaleIn(animationSpec = tween(150)) + fadeIn(animationSpec = tween(150)),
+                exit = scaleOut(animationSpec = tween(150)) + fadeOut(animationSpec = tween(120)),
+            ) {
+                FloatingActionButton(
+                    onClick = { showFabMenu = true }, shape = CircleShape, containerColor = Green,
+                    contentColor = Color.White) { Icon(Icons.Default.Add, editorNewTitle) }
+            }
             Page.Mail -> FloatingActionButton(
                 onClick = { page = Page.LetterEditor(null, null) }, shape = CircleShape, containerColor = Green,
                 contentColor = Color.White) { Icon(Icons.Default.Add, stringResource(R.string.mail_write)) }

@@ -196,13 +196,6 @@ fun TimelinePage(
         return
     }
 
-    // 下滑超过约一屏后显示「回到顶部」，叠在 FAB（+）上方
-    val showBackToTop by remember {
-        androidx.compose.runtime.derivedStateOf {
-            listState.firstVisibleItemIndex > 2 ||
-                listState.firstVisibleItemScrollOffset > 480
-        }
-    }
 
     // 滚动感知：下滑隐藏 chrome（把高度让给内容），上滑立即回来。阈值 4px 用来滤掉抖动。
     var lastIndex by remember { mutableIntStateOf(-1) }
@@ -336,31 +329,6 @@ fun TimelinePage(
     }
     }
 
-    // 回到顶部：叠在 Scaffold FAB（+）上方，下滑一段后出现
-    if (showBackToTop) {
-        Surface(
-            shape = androidx.compose.foundation.shape.CircleShape,
-            color = Color.White,
-            border = BorderStroke(1.dp, Line),
-            shadowElevation = 4.dp,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 16.dp, bottom = 88.dp)
-                .size(44.dp)
-                .clickable {
-                    scope.launch { listState.animateScrollToItem(0) }
-                },
-        ) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(
-                    Icons.Default.KeyboardArrowUp,
-                    contentDescription = stringResource(R.string.a11y_back_to_top),
-                    tint = Quiet,
-                    modifier = Modifier.size(24.dp),
-                )
-            }
-        }
-    }
 
     // 「更多」→ 完整标签面板：搜索、计数、新建、改名、删除都在这里
     if (showTagPanel) {
